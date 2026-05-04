@@ -14,6 +14,7 @@ preset, yuv420p output, +faststart, no audio.
 
 import contextlib
 import datetime
+import queue
 import subprocess
 import tempfile
 import threading
@@ -99,8 +100,21 @@ class VideoRecorder:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._path: Path | None = None
-        self._frame_count = 0
+        # `_frames_queued` counts frames handed to the writer thread (by
+        # the gen thread, in `write_frames`); used by `note_edit` to
+        # anchor scene-edit overlays to the user's edit moment, and by
+        # `end_segment` for the duration check. Frames-actually-written
+        # is a local counter on the writer thread (no instance attr).
+        self._frames_queued = 0
         self._fps = 0
+        # Writer thread + queue. `write_frames` enqueues batches and
+        # returns immediately; the writer thread feeds ffmpeg's stdin
+        # synchronously. The queue is unbounded — a slow encoder can't
+        # backpressure into the gen loop and starve frame generation.
+        # `end_segment` dispatches the drain to a background thread,
+        # so the asyncio handler / gen-thread reset never block on it.
+        self._frame_queue: queue.Queue[list | None] | None = None
+        self._writer_thread: threading.Thread | None = None
         # Scene-edit overlay state. `_overlay_bitmap` is a cropped RGBA region
         # (with the text's own alpha channel) positioned via `_overlay_offset`
         # — per-frame compositing only touches those pixels, not the full frame.
@@ -129,7 +143,7 @@ class VideoRecorder:
         ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
         path = self._output_dir / f"{ts}.mp4"
         self._path = path
-        self._frame_count = 0
+        self._frames_queued = 0
         self._fps = fps
         self._overlay_text = None
         self._overlay_bitmap = None
@@ -174,6 +188,17 @@ class VideoRecorder:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
+            self._frame_queue = queue.Queue()
+            # Capture local refs for the writer thread so a subsequent
+            # `end_segment` can null self._proc / self._frame_queue
+            # without affecting an in-flight drain.
+            self._writer_thread = threading.Thread(
+                target=self._writer_loop,
+                args=(self._proc, self._frame_queue),
+                daemon=True,
+                name="video-recorder",
+            )
+            self._writer_thread.start()
             logger.info(f"Video recording -> {path}")
         except FileNotFoundError:
             logger.warning(f"bundled ffmpeg not found at {FFMPEG_EXE} — video recording disabled")
@@ -184,11 +209,17 @@ class VideoRecorder:
         of frames. No-op if the recorder isn't active or the prompt is empty."""
         if not self.is_active or not prompt:
             return
-        self._overlay_text = prompt
-        self._overlay_start_frame = self._frame_count
-        # Invalidate the cached bitmap so the next frame re-renders with the
-        # new prompt (bitmap stays cached for 5 s, not across edits).
-        self._overlay_bitmap = None
+        # Anchor against `_frames_queued` (frames the gen thread has
+        # handed off so far) so the overlay aligns with the user's
+        # edit moment in the recording, even if the writer thread is
+        # behind. The writer's local counter increments in the same
+        # numbering, so the elapsed-frames math works.
+        with self._lock:
+            self._overlay_text = prompt
+            self._overlay_start_frame = self._frames_queued
+            # Invalidate the cached bitmap so the next frame re-renders with
+            # the new prompt (bitmap stays cached for 5 s, not across edits).
+            self._overlay_bitmap = None
 
     def _ensure_overlay_bitmap(self, frame_w: int, frame_h: int) -> None:
         """Render the overlay bitmap lazily once per edit. Crops to the text
@@ -234,12 +265,15 @@ class VideoRecorder:
         self._overlay_bitmap = np.array(cropped)
         self._overlay_offset = (region_x, region_y)
 
-    def _apply_overlay(self, frame: np.ndarray) -> np.ndarray:
+    def _apply_overlay(self, frame: np.ndarray, frame_idx: int) -> np.ndarray:
         """Composite the active scene-edit overlay onto a single RGB frame.
-        Returns the original frame unchanged when no overlay is active."""
+        `frame_idx` is the absolute index of this frame in the recording
+        (writer-thread local counter), used to compute elapsed time since
+        the edit was registered. Returns the original frame unchanged when
+        no overlay is active."""
         if self._overlay_text is None or self._fps <= 0:
             return frame
-        elapsed_s = (self._frame_count - self._overlay_start_frame) / self._fps
+        elapsed_s = (frame_idx - self._overlay_start_frame) / self._fps
         if elapsed_s >= SCENE_EDIT_OVERLAY_S:
             self._overlay_text = None
             self._overlay_bitmap = None
@@ -269,51 +303,113 @@ class VideoRecorder:
         return out
 
     def write_frames(self, frames: list) -> None:
-        """Write one or more RGB numpy frames to the video."""
-        if self._proc is None or self._proc.stdin is None or self._proc.stdin.closed:
+        """Hand a batch of RGB numpy frames off to the writer thread.
+        Non-blocking — the queue is unbounded so the gen loop never
+        backpressures even if libx264 falls behind. Frames sit in RAM
+        (~10 MB per typical batch) until ffmpeg drains them."""
+        q = self._frame_queue
+        if q is None:
             return
-        with self._lock:
-            for frame in frames:
+        self._frames_queued += len(frames)
+        q.put(frames)
+
+    def _writer_loop(self, proc: subprocess.Popen, frame_queue: "queue.Queue[list | None]") -> None:
+        """Drain enqueued batches into ffmpeg's stdin. Runs as a daemon
+        thread; exits on the `None` sentinel from `_drain_and_close`.
+        `proc` and `frame_queue` are local refs captured by the spawning
+        `new_segment`, so subsequent `end_segment` calls can null the
+        instance attrs without disturbing this drain."""
+        frames_written = 0
+        while True:
+            item = frame_queue.get()
+            if item is None:
+                return
+            for frame in item:
+                if proc.stdin is None or proc.stdin.closed:
+                    continue
                 try:
-                    to_write = self._apply_overlay(frame)
-                    self._proc.stdin.write(to_write.tobytes())
-                    self._frame_count += 1
+                    with self._lock:
+                        to_write = self._apply_overlay(frame, frames_written)
+                    proc.stdin.write(to_write.tobytes())
+                    frames_written += 1
                 except (BrokenPipeError, OSError):
-                    break
+                    # ffmpeg pipe died; finish draining the queue so
+                    # `end_segment`'s join() returns rather than waiting
+                    # on items we'd no longer write anywhere.
+                    while frame_queue.get() is not None:
+                        pass
+                    return
 
     def end_segment(self) -> None:
-        """Finalize the current video, if one is active."""
+        """End the current segment. Returns immediately — the actual
+        drain (writer-thread join + ffmpeg-stdin close + ffmpeg-wait +
+        short-recording cleanup) happens on a background daemon thread
+        so callers (asyncio handler toggling recording off, gen-thread
+        reset) aren't held up by encoder backpressure."""
         if self._proc is None:
             return
+        proc = self._proc
+        frame_queue = self._frame_queue
+        writer = self._writer_thread
         path = self._path
-        frame_count = self._frame_count
+        frames_queued = self._frames_queued
         fps = self._fps
-        try:
-            if self._proc.stdin and not self._proc.stdin.closed:
-                self._proc.stdin.close()
-            # Read stderr before wait() to avoid deadlock when ffmpeg's
-            # stderr pipe buffer fills up.
-            stderr_bytes = self._proc.stderr.read() if self._proc.stderr else b""
-            self._proc.wait(timeout=30)
-            if self._proc.returncode != 0:
-                stderr = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
-                logger.warning(f"FFmpeg exited with rc={self._proc.returncode}: {stderr[:500]}")
-        except Exception as e:  # noqa: BLE001  -- ffmpeg shutdown can raise OSError/TimeoutExpired/ValueError; we want to log+kill regardless
-            logger.warning(f"Error closing video recorder: {e}")
-            with contextlib.suppress(Exception):
-                self._proc.kill()
-        finally:
-            self._proc = None
-            self._path = None
-            self._frame_count = 0
-            self._fps = 0
 
-        # Clean up recordings shorter than MIN_DURATION_S.
-        if path is not None:
-            duration_s = frame_count / fps if fps > 0 else 0.0
-            if frame_count == 0 or duration_s < MIN_DURATION_S:
-                try:
-                    path.unlink(missing_ok=True)
-                    logger.info(f"Removed short video ({frame_count} frames, {duration_s:.1f}s): {path}")
-                except OSError:
-                    pass
+        # Detach the segment so a subsequent `new_segment` can start fresh.
+        self._proc = None
+        self._frame_queue = None
+        self._writer_thread = None
+        self._path = None
+        self._frames_queued = 0
+        self._fps = 0
+        self._overlay_text = None
+        self._overlay_bitmap = None
+
+        threading.Thread(
+            target=_drain_and_close,
+            args=(proc, frame_queue, writer, path, frames_queued, fps),
+            daemon=True,
+            name="video-recorder-drain",
+        ).start()
+
+
+def _drain_and_close(
+    proc: subprocess.Popen,
+    frame_queue: "queue.Queue[list | None] | None",
+    writer_thread: threading.Thread | None,
+    path: Path | None,
+    frames_queued: int,
+    fps: int,
+) -> None:
+    """Background helper: signal the writer thread to drain, close
+    ffmpeg's stdin, wait for ffmpeg to exit, and clean up short
+    recordings. Called by `VideoRecorder.end_segment` so the calling
+    thread isn't blocked on encoder backpressure."""
+    if frame_queue is not None:
+        frame_queue.put(None)
+    if writer_thread is not None:
+        writer_thread.join()
+    try:
+        if proc.stdin and not proc.stdin.closed:
+            proc.stdin.close()
+        # Read stderr before wait() to avoid deadlock when ffmpeg's
+        # stderr pipe buffer fills up.
+        stderr_bytes = proc.stderr.read() if proc.stderr else b""
+        proc.wait(timeout=30)
+        if proc.returncode != 0:
+            stderr = stderr_bytes.decode(errors="replace") if stderr_bytes else ""
+            logger.warning(f"FFmpeg exited with rc={proc.returncode}: {stderr[:500]}")
+    except Exception as e:  # noqa: BLE001  -- ffmpeg shutdown can raise OSError/TimeoutExpired/ValueError; we want to log+kill regardless
+        logger.warning(f"Error closing video recorder: {e}")
+        with contextlib.suppress(Exception):
+            proc.kill()
+
+    # Clean up recordings shorter than MIN_DURATION_S.
+    if path is not None:
+        duration_s = frames_queued / fps if fps > 0 else 0.0
+        if frames_queued == 0 or duration_s < MIN_DURATION_S:
+            try:
+                path.unlink(missing_ok=True)
+                logger.info(f"Removed short video ({frames_queued} frames, {duration_s:.1f}s): {path}")
+            except OSError:
+                pass
