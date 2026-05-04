@@ -381,11 +381,12 @@ export const useWebSocket = (): WebSocketHook => {
   }, [])
 
   const sendNotif = useCallback((notif: ClientNotif): boolean => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(notif))
-      return true
-    }
-    return false
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false
+    // `notif` is typed `ClientNotif` so each construction site (sendControl,
+    // sendPause, reset) is checked at compile time — no runtime validation
+    // needed here.
+    wsRef.current.send(JSON.stringify(notif))
+    return true
   }, [])
 
   const sendControl = useCallback(

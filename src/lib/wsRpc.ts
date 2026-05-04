@@ -97,7 +97,11 @@ export class WsRpcClient {
     if (msg.success) {
       entry.resolve(msg.data)
     } else {
-      const errorId = msg.error_id as TranslationKey | undefined
+      // `MessageId` is a subset of `TranslationKey` (the i18n drift gate
+      // in `src/i18n/index.ts` enforces this at compile time), so the
+      // typed `msg.error_id` assigns to `TranslationKey | undefined`
+      // without a cast.
+      const errorId: TranslationKey | undefined = msg.error_id
       entry.reject(new RpcError(msg.error ?? errorId ?? 'Request failed', errorId))
     }
 
@@ -132,17 +136,23 @@ export class WsRpcClient {
             }, timeout)
           : undefined
 
+      // The typed `resolve` (`(value: RpcRequestMap[K]['response']) => void`)
+      // gets erased to `(data: unknown) => void` for storage in the
+      // non-generic `pending` map. handleMessage's `entry.resolve(msg.data)`
+      // re-enters the original closure, so K is preserved by capture even
+      // though the Map can't track it. Necessary type-erasure at the
+      // storage boundary; not a soundness hole.
       this.pending.set(reqId, {
         resolve: resolve as (data: unknown) => void,
         reject,
         timer
       })
 
-      // Construct the typed request envelope. tsc verifies the params
-      // against the request shape; the spread reattaches them with the
-      // mandatory `type` / `req_id` fields the server expects.
-      const envelope = { type, req_id: reqId, ...params } as RpcRequestMap[K]['request']
-      this.ws!.send(JSON.stringify(envelope))
+      // Construction is correct by type: `params` is constrained to the
+      // request shape minus `type`/`req_id`, so the spread plus those two
+      // fields is structurally `RpcRequestMap[K]['request']`. JSON.stringify
+      // accepts unknown — no cast needed.
+      this.ws!.send(JSON.stringify({ type, req_id: reqId, ...params }))
     })
   }
 }
