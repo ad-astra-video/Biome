@@ -12,18 +12,33 @@ gets timestamps and is captured.
 import asyncio
 import contextlib
 import faulthandler
+import json
 import logging
 import os
 import signal
 import sys
 import threading
+import warnings
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import structlog
 from structlog.types import EventDict, Processor
 
 from server.protocol import LogMessage
+
+# `format_exc_info` is critical for the WS broadcast — it materialises
+# `exc_info=True` into an `event_dict["exception"]` string that
+# `_capture_for_broadcast` ships to clients and `_text_renderer`
+# embeds in the rendered line. structlog warns about pairing it with
+# `ConsoleRenderer` (which has its own pretty-print path) but our custom
+# renderer handles `exception` itself, so the warning is misleading
+# noise. Filter it once at startup.
+warnings.filterwarnings(
+    "ignore",
+    message="Remove `format_exc_info` from your processor chain",
+    category=UserWarning,
+)
 
 if TYPE_CHECKING:
     from server.session.connection import Connection
@@ -103,27 +118,51 @@ class LogBroadcast:
 # Install TeeStream + configure logging
 # ---------------------------------------------------------------------------
 
+
+def _resolve_log_format() -> Literal["text", "json"]:
+    """Pick text vs JSON output for stdout / `server.log` / WS-replay.
+
+    Priority:
+      - `BIOME_LOG_FORMAT` env var (`text` / `json`) is the explicit override.
+      - Otherwise: text when stdout is a TTY (direct terminal dev), JSON
+        when it isn't (typical when spawned by Electron, or when piped
+        through a tool that wants structured records).
+
+    The WS broadcast and the diagnostic export always carry the structured
+    `LogMessage` shape — only the on-stdout / on-disk encoding changes."""
+    override = os.environ.get("BIOME_LOG_FORMAT", "").strip().lower()
+    if override == "text":
+        return "text"
+    if override == "json":
+        return "json"
+    return "text" if sys.stdout.isatty() else "json"
+
+
+LOG_FORMAT: Literal["text", "json"] = _resolve_log_format()
+
 SERVER_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 _hosted_log_fp = open(SERVER_LOG_FILE, "w", encoding="utf-8", buffering=1)  # noqa: SIM115  -- handle owned by the TeeStream pair below; closed at process exit
 sys.stdout = TeeStream(sys.stdout, _hosted_log_fp)
 sys.stderr = TeeStream(sys.stderr, _hosted_log_fp)
 
 # `structlog` produces structured event dicts, runs them through a processor
-# pipeline, and emits the rendered string via stdlib's `logging.Logger.info(...)`.
-# That keeps existing transports (TeeStream → stdout, server.log file, WS
-# broadcast) unchanged while giving us:
+# pipeline, and hands the final rendering off to stdlib's
+# `logging.Logger.info(...)`. The pipeline gives us:
 #   - Per-event structured fields (`logger.info("Loading seed", filename=name)`).
 #   - Per-connection scope via `structlog.contextvars.bind_contextvars(client_host=...)`
 #     at WS accept; asyncio tasks inherit, the gen thread is wired explicitly
 #     (see `server.session.workers.run_generator`).
 #   - A migration path to Rust's `tracing` if/when this server is ported.
 #
-# stdout / WS stream / server.log all see the same human-readable rendering:
-#
-#     12:34:56 [info] [engine.manager] Loading model model=waypoint-1.5 step=1/3
-#
-# `colors=False` keeps ANSI out of the log file; the renderer's terminal UI
-# already strips ANSI but adds its own colour pass.
+# The final renderer is picked by `LOG_FORMAT`:
+#   - text mode → `ConsoleRenderer` (one human-readable line per event,
+#     for direct-terminal dev).
+#   - JSON mode → `JSONRenderer` (one JSON object per line, parsed back
+#     into a typed `LogRecord` by the Electron-side line stream and the
+#     WS-replay path).
+# The WS broadcast always ships structured `LogMessage` records regardless
+# of the local renderer, so connected clients get the same fidelity in
+# either mode.
 
 _PRE_CHAIN: list[Processor] = [
     structlog.contextvars.merge_contextvars,
@@ -132,38 +171,82 @@ _PRE_CHAIN: list[Processor] = [
     structlog.processors.TimeStamper(fmt="%H:%M:%S"),
 ]
 
-# Single shared renderer instance — used by `_capture_for_broadcast` to
-# render the human-readable line that goes into `LogMessage.line`, and as
-# the final processor in the pipeline that ships the same string to
-# stdlib's logger (and on to TeeStream → file/stdout).
-_console_renderer = structlog.dev.ConsoleRenderer(colors=False)
+# Reserved keys are the structlog-managed fields that have dedicated slots
+# on `LogMessage`; everything else in the event_dict ends up in `fields`.
+_RESERVED_EVENT_KEYS = frozenset({"event", "level", "logger", "timestamp", "exc_info", "exception"})
+
+
+def _build_log_message(event_dict: EventDict) -> LogMessage:
+    """Project the structlog event_dict onto a typed `LogMessage`. Reserved
+    keys map to dedicated fields; the remainder land under `fields`."""
+    extras: dict[str, str | int | float | bool] = {
+        k: v if isinstance(v, str | int | float | bool) else str(v)
+        for k, v in event_dict.items()
+        if k not in _RESERVED_EVENT_KEYS
+    }
+    return LogMessage(
+        event=str(event_dict.get("event", "")),
+        level=str(event_dict.get("level", "info")),
+        logger=event_dict.get("logger"),
+        timestamp=event_dict.get("timestamp"),
+        exception=event_dict.get("exception"),
+        fields=extras or None,
+    )
 
 
 def _capture_for_broadcast(_logger, _method_name: str, event_dict: EventDict) -> EventDict:
-    """Snapshot the structured event for the WS broadcast queue, then
-    pass through to the renderer.
+    """Snapshot the structured event for the WS broadcast queue, then pass
+    the dict through to the final renderer.
 
-    Runs after the pre-chain (so `event_dict` already has level / logger
-    / timestamp / merged contextvars) and before `_console_renderer`. We
-    render the line here so the broadcast message and the stdout line
-    are byte-identical, then return the original event_dict for the
-    final renderer to produce the same text again — Python doesn't let
-    us return both a string and a dict from the same processor without
-    breaking the pipeline contract."""
-    snapshot = dict(event_dict)
-    line = _console_renderer(_logger, _method_name, dict(event_dict))
-    reserved = {"event", "level", "logger", "timestamp", "exc_info", "exception"}
-    fields = {k: str(v) for k, v in snapshot.items() if k not in reserved}
-    LogBroadcast.push(
-        LogMessage(
-            line=str(line),
-            level=str(snapshot.get("level", "info")),
-            logger=snapshot.get("logger"),
-            timestamp=snapshot.get("timestamp"),
-            fields=fields or None,
-        )
-    )
+    Runs after the pre-chain (so `event_dict` already has level / logger /
+    timestamp / merged contextvars) and after `format_exc_info` (so the
+    formatted traceback is on `event_dict["exception"]`)."""
+    LogBroadcast.push(_build_log_message(event_dict))
     return event_dict
+
+
+def _text_renderer(_logger, _method_name: str, event_dict: EventDict) -> str:
+    """Render an event_dict as a single line in the form
+    ``HH:MM:SS [level   ] [logger] event k1=v1 k2=v2``. Same shape as
+    `ConsoleRenderer` but with the logger pill *before* the event, so
+    the fixed `[level] [logger]` prefix block stays scannable while the
+    event sits at a variable column. Exceptions go on a following line."""
+    timestamp = event_dict.pop("timestamp", None)
+    level = str(event_dict.pop("level", "info"))
+    logger_name = event_dict.pop("logger", None)
+    event = str(event_dict.pop("event", ""))
+    exception = event_dict.pop("exception", None)
+    event_dict.pop("exc_info", None)
+
+    parts: list[str] = []
+    if timestamp:
+        parts.append(str(timestamp))
+    parts.append(f"[{level:<8}]")
+    if logger_name:
+        parts.append(f"[{logger_name}]")
+    parts.append(event)
+    parts.extend(f"{k}={v}" for k, v in event_dict.items())
+    line = " ".join(parts)
+    if exception:
+        line = f"{line}\n{exception}"
+    return line
+
+
+_json_renderer = structlog.processors.JSONRenderer()
+_final_renderer: Processor = _text_renderer if LOG_FORMAT == "text" else _json_renderer
+
+
+class _BoundLogger(structlog.stdlib.BoundLogger):
+    """Override `.exception()` to dispatch through stdlib's `error` method
+    rather than `exception`. structlog's pipeline already formats the
+    traceback into `event_dict["exception"]` via `format_exc_info`; if we
+    let the call surface as `stdlib.Logger.exception`, stdlib's own
+    implementation defaults `exc_info=True` and re-renders the traceback
+    on top of our string, producing duplicate output."""
+
+    def exception(self, event: str | None = None, *args: Any, **kw: Any) -> Any:
+        kw.setdefault("exc_info", True)
+        return self._proxy_to_logger("error", event, *args, **kw)
 
 
 structlog.configure(
@@ -175,9 +258,9 @@ structlog.configure(
         # Side-effect: ship the structured event to WS clients before
         # the final renderer reduces it to a string.
         _capture_for_broadcast,
-        _console_renderer,
+        _final_renderer,
     ],
-    wrapper_class=structlog.stdlib.BoundLogger,
+    wrapper_class=_BoundLogger,
     logger_factory=structlog.stdlib.LoggerFactory(),
     cache_logger_on_first_use=True,
 )
@@ -247,32 +330,47 @@ _install_crash_logging_hooks()
 LOG_TAIL_INITIAL_LINES = 220
 
 
-def read_log_tail_lines(max_lines: int) -> list[str]:
-    """Read last non-empty lines from the canonical server log file."""
+def read_log_tail_records(max_lines: int) -> list[LogMessage]:
+    """Read the last lines of `server.log` and project each onto a
+    `LogMessage`. In JSON mode each line is a structlog event_dict;
+    in text mode (or when a JSON line fails to parse, e.g. a uvicorn
+    line that wasn't routed through structlog) we fall back to a
+    record carrying just the rendered text on `event`."""
     if max_lines <= 0:
         return []
     try:
         with open(SERVER_LOG_FILE, encoding="utf-8", errors="replace") as fp:
             lines = [line.rstrip("\r\n") for line in fp if line.strip()]
-        return lines[-max_lines:]
     except OSError:
         return []
 
+    return [_parse_log_line(line) for line in lines[-max_lines:]]
+
+
+def _parse_log_line(line: str) -> LogMessage:
+    """Project a single log-file line onto a `LogMessage`. JSON mode
+    yields a full structured record; text mode (or any JSON parse
+    failure) degrades to `LogMessage(event=line)`."""
+    if LOG_FORMAT == "json":
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            return LogMessage(event=line)
+        if isinstance(obj, dict):
+            return _build_log_message(obj)
+        return LogMessage(event=line)
+    return LogMessage(event=line)
+
 
 async def stream_logs_to_client(conn: "Connection") -> None:
-    """Replay the recent log tail, then attach to LogBroadcast for live updates,
-    pushing each event as a typed `LogMessage` over the WebSocket.
-
-    Historical lines from the log file are replayed without structured fields
-    (the file only stores rendered text); live events arrive with full
-    `level` / `logger` / `timestamp` / `fields` populated by the structlog
-    pipeline.
+    """Replay the recent log tail, then attach to LogBroadcast for live
+    updates, pushing each event as a typed `LogMessage` over the WebSocket.
 
     Run as an asyncio task; cancel to stop. The LogBroadcast registration is
     lifted by `Connection.teardown` (so cancellation timing doesn't matter)."""
     try:
-        for line in read_log_tail_lines(LOG_TAIL_INITIAL_LINES):
-            await conn.send_message(LogMessage(line=line))
+        for record in read_log_tail_records(LOG_TAIL_INITIAL_LINES):
+            await conn.send_message(record)
         LogBroadcast.register_client(conn.log_queue, conn.main_loop)
 
         while True:

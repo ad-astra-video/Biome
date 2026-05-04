@@ -34,10 +34,11 @@ const log = createLogger('WebSocket')
 const MAX_VISIBLE_LOG_LINES = 500
 
 const toLogRecord = (msg: LogMessage): LogRecord => ({
-  line: stripAnsi(msg.line),
+  event: stripAnsi(msg.event),
   level: msg.level,
   logger: msg.logger,
   timestamp: msg.timestamp,
+  exception: msg.exception,
   fields: msg.fields
 })
 

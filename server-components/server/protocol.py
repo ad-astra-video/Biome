@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 # ──────────────────────────────────────────────────────────────────────
 
 
-PROTOCOL_VERSION = 1
+PROTOCOL_VERSION = 2
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -320,24 +320,23 @@ class WarningMessage(BaseModel):
 class LogMessage(BaseModel):
     """One emitted server-side log event, mirrored to connected clients.
 
-    `line` is the human-readable rendering used by the renderer's terminal
-    UI as-is. The remaining fields are the structured form: the logger
-    name, the rendered timestamp, the bound contextvars / kwargs that
-    structlog produced. The renderer keeps both — `line` for display,
-    `fields` / `logger` / `timestamp` for the diagnostic payload export
-    and any future structured consumer."""
+    Carries the structured event_dict from structlog: the message string,
+    severity, logger name, rendered timestamp, formatted exception
+    traceback (when present), and the merged contextvars + per-call
+    kwargs. The renderer reconstructs any human-readable form it wants
+    — there is no pre-rendered text on the wire."""
 
     model_config = _FrozenStrict
     type: Literal["log"] = "log"
-    line: str
+    event: str
     level: str = "info"
     logger: str | None = None
     timestamp: str | None = None
-    # Field values land here as scalars (str / int / float / bool); we
-    # serialize via `str()` at capture time so the wire shape stays a
-    # uniform `dict[str, str]` and the renderer can render every field
-    # without per-type formatting.
-    fields: dict[str, str] | None = None
+    exception: str | None = None
+    # Bound contextvars (e.g. `client_host`) plus per-call kwargs
+    # (e.g. `model="…"`, `current_step=1`). Primitive types are kept
+    # verbatim so the diagnostic export retains type fidelity.
+    fields: dict[str, str | int | float | bool] | None = None
 
 
 ServerPushMessage = Annotated[

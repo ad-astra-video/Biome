@@ -30,8 +30,7 @@ export function useEngineLogs(enabled = true): { logs: LogRecord[]; clear: () =>
   useEffect(() => {
     if (!enabled) return
 
-    const unlisten = listen('engine-log', (payload) => {
-      const record: LogRecord = { line: payload.line, level: payload.is_stderr ? 'error' : 'info' }
+    const unlisten = listen('engine-log', (record) => {
       setLogs((prev) => {
         const next = [...prev, record]
         return next.length > MAX_LINES ? next.slice(-MAX_LINES) : next

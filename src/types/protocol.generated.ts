@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 // ─── Constants ────────────────────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 
 // ─── Enums ────────────────────────────────────────────────────────────
 
@@ -211,20 +211,20 @@ export type WarningMessage = z.infer<typeof WarningMessageSchema>
 /**
  * One emitted server-side log event, mirrored to connected clients.
  *
- * `line` is the human-readable rendering used by the renderer's terminal
- * UI as-is. The remaining fields are the structured form: the logger
- * name, the rendered timestamp, the bound contextvars / kwargs that
- * structlog produced. The renderer keeps both — `line` for display,
- * `fields` / `logger` / `timestamp` for the diagnostic payload export
- * and any future structured consumer.
+ * Carries the structured event_dict from structlog: the message string,
+ * severity, logger name, rendered timestamp, formatted exception
+ * traceback (when present), and the merged contextvars + per-call
+ * kwargs. The renderer reconstructs any human-readable form it wants
+ * — there is no pre-rendered text on the wire.
  */
 export const LogMessageSchema = z.object({
   type: z.literal('log'),
-  line: z.string(),
+  event: z.string(),
   level: z.string().optional(),
   logger: z.string().optional(),
   timestamp: z.string().optional(),
-  fields: z.record(z.string(), z.string()).optional()
+  exception: z.string().optional(),
+  fields: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional()
 })
 export type LogMessage = z.infer<typeof LogMessageSchema>
 

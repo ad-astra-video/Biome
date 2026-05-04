@@ -175,21 +175,25 @@ export type DiagnosticsStateAtError = {
 
 /** A single log entry buffered on the renderer.  Mirrors the wire-shape of
  *  the server's `LogMessage` (minus the `type` discriminator) and is also
- *  used for engine-log IPC events from the Electron main process — local
- *  events only carry `line`, server events carry the full structured form.
+ *  used for engine-log IPC events from the Electron main process — events
+ *  whose source is a structlog event_dict carry the full structured form;
+ *  events whose source is raw subprocess stdout (uv sync output, pre-init
+ *  Python stderr, etc.) degrade to `{ event }` plus a derived `level`.
  *  Stored as JSON objects in {@link DiagnosticsPayload} so external triagers
- *  can read structured fields directly without re-parsing rendered text. */
+ *  see the structured form directly. */
 export type LogRecord = {
-  /** Human-readable rendering, ready for display. */
-  line: string
+  /** Human-readable message — the first positional arg passed to the logger. */
+  event: string
   /** Severity ("info", "warning", "error", ...) when the source attaches one. */
   level?: string
   /** Logger name (typically the originating module path). */
   logger?: string
   /** Rendered timestamp from the server's structlog pipeline. */
   timestamp?: string
+  /** Pre-formatted exception traceback when the event was a `log.exception(...)`. */
+  exception?: string
   /** Bound contextvars and event kwargs (e.g. `client_host`, `step`). */
-  fields?: Record<string, string>
+  fields?: Record<string, string | number | boolean>
 }
 
 /** Top-level diagnostics payload copied to clipboard / attached to GitHub
@@ -320,6 +324,6 @@ export type IpcCommandMap = {
 export type IpcEventMap = {
   'server-ready': boolean
   'server-stage': { id: string; label: string; percent: number }
-  'engine-log': { line: string; is_stderr: boolean }
+  'engine-log': LogRecord
   'window-resized': { width: number; height: number }
 }

@@ -15,6 +15,7 @@ import {
   stopServerSync
 } from '../lib/serverState.js'
 import { copyServerComponentFiles } from '../lib/serverFiles.js'
+import { parseLogLine } from '../lib/logRecord.js'
 import { emitToAllWindows } from '../lib/ipcUtils.js'
 import { getOfflineEnv } from './settings.js'
 
@@ -117,7 +118,7 @@ export function registerServerIpc(): void {
     const handleLine = (line: string, isStderr: boolean) => {
       console.log(`[SERVER] ${line}`)
       fs.appendFileSync(logFilePath, line + '\n', 'utf-8')
-      emitToAllWindows('engine-log', { line, is_stderr: isStderr })
+      emitToAllWindows('engine-log', parseLogLine(line, isStderr))
       recentLines.push(line)
       if (recentLines.length > LOG_TAIL_MAX_LINES) recentLines.shift()
     }

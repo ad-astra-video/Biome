@@ -88,12 +88,19 @@ def render_type(tp: Any) -> str:
 
     origin = get_origin(tp)
 
-    # Union types: T | U | None  →  T | U | null  (with null only if None present)
+    # Union types: T | U | None  →  T | U | null  (with null only if None present).
+    # Dedup is by *rendered* TS form so `int | float` collapses to a single
+    # `number` rather than `number | number`.
     if origin in (Union, types.UnionType):
         args = list(get_args(tp))
         has_none = type(None) in args
         non_none = [a for a in args if a is not type(None)]
-        rendered = " | ".join(render_type(a) for a in non_none)
+        rendered_unique: list[str] = []
+        for a in non_none:
+            r = render_type(a)
+            if r not in rendered_unique:
+                rendered_unique.append(r)
+        rendered = " | ".join(rendered_unique)
         if has_none:
             rendered += " | null"
         return rendered
@@ -441,15 +448,18 @@ def render_zod_type(tp: Any) -> str:
 
     origin = get_origin(tp)
 
-    # Union types: T | U | None  →  z.union([T, U]).nullable()  (or .optional() at field level)
+    # Union types: T | U | None  →  z.union([T, U]).nullable()  (or .optional() at field level).
+    # Dedup mirrors `render_type`: `int | float` collapses to `z.number()`.
     if origin in (Union, types.UnionType):
         args = list(get_args(tp))
         non_none = [a for a in args if a is not type(None)]
         has_none = type(None) in args
-        if len(non_none) == 1:
-            inner = render_zod_type(non_none[0])
-        else:
-            inner = f"z.union([{', '.join(render_zod_type(a) for a in non_none)}])"
+        rendered_unique: list[str] = []
+        for a in non_none:
+            r = render_zod_type(a)
+            if r not in rendered_unique:
+                rendered_unique.append(r)
+        inner = rendered_unique[0] if len(rendered_unique) == 1 else f"z.union([{', '.join(rendered_unique)}])"
         return f"{inner}.nullable()" if has_none else inner
 
     if origin is Literal:

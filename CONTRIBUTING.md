@@ -37,16 +37,52 @@ Ruff's `TRY003` flags long messages passed to bare `RuntimeError` / `ValueError`
 Server-side logs go through `structlog` (configured once in `util/server_logging.py`). Get a logger with `log = structlog.stdlib.get_logger(__name__)` at the top of each module — the module name is the scope, and an event renders as:
 
 ```
-12:34:56 [info     ] Loading model                  [engine.manager] client_host=127.0.0.1 model=waypoint-1.5 current_step=1 total_steps=3
+12:34:56 [info    ] [engine.manager] Loading model client_host=127.0.0.1 model=waypoint-1.5 current_step=1 total_steps=3
 ```
 
 - **Pass dynamic data as kwargs, not f-strings.** `logger.info("Loading seed", filename=name)` over `logger.info(f"Loading seed {name}")`. The renderer prints them as `key=value`; the WS broadcast and diagnostics export keep them as a structured `dict`.
 - **Per-connection scope.** The WS endpoint wraps each session in `structlog.contextvars.bound_contextvars(client_host=...)` so every event under that connection auto-tags `client_host`. Asyncio tasks inherit the contextvars; the generator thread is wired explicitly via `contextvars.copy_context()` (see `server/session/workers.run_generator`).
 - **Sub-operation scope.** Inside a routine that owns a multi-step operation, bind once with `log = logger.bind(operation="reset")` and re-use `log` for the rest of that scope. Use `current_step=N, total_steps=TOTAL` (with `TOTAL` as a module-level constant — see `LOAD_ENGINE_TOTAL_STEPS` / `WARMUP_TOTAL_STEPS` in `engine/manager.py`) rather than `[1/3]` in the message text.
 - **No bracketed prefixes** (`[ENGINE]`, `[RECV]`, `[GENERATE_SCENE]`, …). The logger name and bound contextvars already carry scope; if the current scope isn't enough, bind another contextvar or `operation` rather than re-introducing prefixes.
-- **Broadcast and file mirroring are split.** `LogBroadcast` is fed by a structlog processor and fans each event out as a typed `LogMessage` (rendered line + level + logger + timestamp + fields) to every connected WS client. `TeeStream` only mirrors stdout/stderr into `server.log`.
+- **Broadcast and file mirroring are split.** `LogBroadcast` is fed by a structlog processor and fans each event out as a typed `LogMessage` (`event` + `level` + `logger` + `timestamp` + `exception` + `fields`) to every connected WS client. `TeeStream` only mirrors stdout/stderr into `server.log`. The WS broadcast always carries the structured form regardless of the local renderer.
 
-A future port to Rust's `tracing` should map cleanly: spans ↔ contextvars, fields ↔ kwargs, the `tracing_subscriber` console layer ↔ `ConsoleRenderer`.
+#### stdout / `server.log` format — text vs JSON
+
+The final structlog processor is picked at startup by `_resolve_log_format()` in `util/server_logging.py`:
+
+| `BIOME_LOG_FORMAT` | TTY?    | Format chosen                                     |
+| ------------------ | ------- | ------------------------------------------------- |
+| `text`             | (any)   | Custom `_text_renderer` — single line             |
+| `json`             | (any)   | `JSONRenderer` — JSON-Lines                       |
+| _unset_            | TTY     | text (developer running `uv run python main.py`)  |
+| _unset_            | non-TTY | JSON (typical when spawned by Electron, or piped) |
+
+Override either direction with `BIOME_LOG_FORMAT=text|json` if you want JSON in a terminal (pipe through `jq`) or text from a non-TTY child process. Each format reads:
+
+```
+# text mode
+12:34:56 [info    ] [engine.manager] Loading model model=waypoint-1.5 current_step=1 total_steps=3
+
+# JSON mode (one event per line, formatted here for readability)
+{"event": "Loading model", "level": "info", "logger": "engine.manager", "timestamp": "12:34:56", "model": "waypoint-1.5", "current_step": 1, "total_steps": 3}
+```
+
+In JSON mode, `read_log_tail_records` parses each replayed `server.log` line back into a `LogMessage` so the WS log replay carries the same fidelity as live events; in text mode each line replays as `LogMessage(event=line)` (degraded — only matters across server restarts).
+
+#### Renderer-side rendering
+
+`ServerLogDisplay`'s `LogLine` component renders each `LogRecord` (sourced from a Python WS log push or an Electron `engine-log` IPC event) with a fixed visual hierarchy that mirrors the text-mode formatter:
+
+- timestamp — dim, mono
+- level — uppercase, color-coded (`info` body, `warning` warm, `error`/`critical` bright)
+- logger — `[name]` mono, dim
+- event — body color
+- fields — `key=value` pairs, dim
+- exception — preformatted block underneath, error-colored
+
+Plain-text formatting for clipboard / GitHub-issue exports goes through `formatLogRecordPlainText` in the same file so the on-screen and exported strings stay aligned.
+
+A future port to Rust's `tracing` should map cleanly: spans ↔ contextvars, fields ↔ kwargs, the `tracing_subscriber` JSON layer ↔ `JSONRenderer`, the console layer ↔ `_text_renderer`.
 
 ### Logging exceptions
 

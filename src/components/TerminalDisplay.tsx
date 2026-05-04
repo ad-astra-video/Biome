@@ -88,7 +88,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   }
 
   const buildPayload = useCallback(() => {
-    const logs = errorDetail ? [...activeLogs, { line: `[ERROR] ${errorDetail}`, level: 'error' }] : activeLogs
+    const logs = errorDetail ? [...activeLogs, { event: errorDetail, level: 'error' }] : activeLogs
     return buildDiagnosticsPayload({
       connection,
       error: {

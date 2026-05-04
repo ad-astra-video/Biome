@@ -9,6 +9,7 @@ import { getServerState, stopServerSync } from '../lib/serverState.js'
 import { runUvSyncWithMirroredLogs } from '../lib/uvSync.js'
 import { copyServerComponentFiles, ensureEngineFont } from '../lib/serverFiles.js'
 import { emitToAllWindows } from '../lib/ipcUtils.js'
+import { parseLogLine } from '../lib/logRecord.js'
 import { getOfflineEnv } from './settings.js'
 
 const UV_VERSION = '0.10.9'
@@ -74,7 +75,7 @@ async function syncEngineDependencies(signal?: AbortSignal): Promise<void> {
       logPrefix: '[ENGINE]',
       signal,
       onLine: (line, isStderr) => {
-        emitToAllWindows('engine-log', { line, is_stderr: isStderr })
+        emitToAllWindows('engine-log', parseLogLine(line, isStderr))
       }
     }
   )
@@ -83,7 +84,7 @@ async function syncEngineDependencies(signal?: AbortSignal): Promise<void> {
 
 /** Full engine setup: install UV if needed, copy server components, sync dependencies. */
 async function reinstallEngine(signal?: AbortSignal): Promise<void> {
-  emitToAllWindows('engine-log', { line: '[ENGINE] Checking uv installation...', is_stderr: false })
+  emitToAllWindows('engine-log', parseLogLine('[ENGINE] Checking uv installation...', false))
   const uvBinary = getUvBinaryPath()
 
   let uvInstalled = false
@@ -97,20 +98,17 @@ async function reinstallEngine(signal?: AbortSignal): Promise<void> {
   }
 
   if (!uvInstalled) {
-    emitToAllWindows('engine-log', { line: '[ENGINE] Installing uv...', is_stderr: false })
+    emitToAllWindows('engine-log', parseLogLine('[ENGINE] Installing uv...', false))
     await installUv()
   }
 
-  emitToAllWindows('engine-log', { line: '[ENGINE] Setting up server components...', is_stderr: false })
+  emitToAllWindows('engine-log', parseLogLine('[ENGINE] Setting up server components...', false))
   copyServerComponentFiles(getEngineDir())
 
-  emitToAllWindows('engine-log', {
-    line: '[ENGINE] Syncing dependencies (this may take a while)...',
-    is_stderr: false
-  })
+  emitToAllWindows('engine-log', parseLogLine('[ENGINE] Syncing dependencies (this may take a while)...', false))
   await syncEngineDependencies(signal)
 
-  emitToAllWindows('engine-log', { line: '[ENGINE] Setup complete.', is_stderr: false })
+  emitToAllWindows('engine-log', parseLogLine('[ENGINE] Setup complete.', false))
 }
 
 /** Nuke engine and UV directories. */
@@ -122,11 +120,11 @@ function nukeEngineDirectories(): void {
 
   if (fs.existsSync(engineDir)) {
     fs.rmSync(engineDir, { recursive: true, force: true })
-    emitToAllWindows('engine-log', { line: `[ENGINE] Removed ${engineDir}`, is_stderr: false })
+    emitToAllWindows('engine-log', parseLogLine(`[ENGINE] Removed ${engineDir}`, false))
   }
   if (fs.existsSync(uvDir)) {
     fs.rmSync(uvDir, { recursive: true, force: true })
-    emitToAllWindows('engine-log', { line: `[ENGINE] Removed ${uvDir}`, is_stderr: false })
+    emitToAllWindows('engine-log', parseLogLine(`[ENGINE] Removed ${uvDir}`, false))
   }
 }
 
