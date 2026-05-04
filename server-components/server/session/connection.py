@@ -21,7 +21,6 @@ workers live in `workers.py`. This module owns connection state only.
 
 import asyncio
 import contextlib
-import json
 import logging
 import struct
 import threading
@@ -37,6 +36,7 @@ from recording.action_logger import ActionLogger
 from recording.video_recorder import RecordingProperties, VideoRecorder
 from server.protocol import (
     ErrorMessage,
+    FrameHeader,
     MessageId,
     StageId,
     StatusMessage,
@@ -266,22 +266,23 @@ class Connection:
         client_ts: float,
         gen_ms: float,
         temporal_compression: int = 1,
-        profile: dict | None = None,
+        profile: dict[str, float] | None = None,
     ) -> bytes:
         """Wrap a JPEG-encoded frame in the binary protocol envelope:
-        4-byte LE header length, JSON header (frame_id / timing / GPU
-        metrics / optional per-frame profile), JPEG payload."""
-        header_data: dict = {
-            "frame_id": frame_id,
-            "client_ts": client_ts,
-            "gen_ms": gen_ms,
-            "temporal_compression": temporal_compression,
-            "vram_used_bytes": self.cached_vram_used_bytes,
-            "gpu_util_percent": self.cached_gpu_util_percent,
-        }
-        if profile is not None:
-            header_data.update(profile)
-        header = json.dumps(header_data, separators=(",", ":")).encode("utf-8")
+        4-byte LE header length, JSON header (validated against
+        `FrameHeader`), JPEG payload. Going through `FrameHeader` here
+        means the wire shape can't drift from the type the codegen ships
+        to the renderer."""
+        header_obj = FrameHeader(
+            frame_id=frame_id,
+            client_ts=client_ts,
+            gen_ms=gen_ms,
+            temporal_compression=temporal_compression,
+            vram_used_bytes=self.cached_vram_used_bytes,
+            gpu_util_percent=self.cached_gpu_util_percent,
+            **(profile or {}),
+        )
+        header = header_obj.model_dump_json(exclude_none=True).encode("utf-8")
         return struct.pack("<I", len(header)) + header + jpeg
 
     # ─── Threadsafe enqueue helper (any thread) ────────────────────
@@ -315,11 +316,7 @@ class Connection:
         assert seed is not None, "send_initial_frame requires a loaded seed"
         first_subframe = seed[0] if world_engine.is_multiframe else seed
         jpeg = await asyncio.to_thread(world_engine.frame_to_jpeg, first_subframe)
-        header = json.dumps(
-            {"frame_id": 0, "client_ts": 0, "gen_ms": 0},
-            separators=(",", ":"),
-        ).encode("utf-8")
-        await self.websocket.send_bytes(struct.pack("<I", len(header)) + header + jpeg)
+        await self.websocket.send_bytes(self.build_frame_envelope(jpeg, frame_id=0, client_ts=0.0, gen_ms=0.0))
 
     def start_recording_segments(self, world_engine: "WorldEngineManager") -> None:
         """Construct the action logger (if logging requested) and open
