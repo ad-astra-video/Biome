@@ -203,11 +203,23 @@ export const WarningMessageSchema = z.object({
 })
 export type WarningMessage = z.infer<typeof WarningMessageSchema>
 
-/** A line of server log output, mirrored to connected clients. */
+/**
+ * One emitted server-side log event, mirrored to connected clients.
+ *
+ * `line` is the human-readable rendering used by the renderer's terminal
+ * UI as-is. The remaining fields are the structured form: the logger
+ * name, the rendered timestamp, the bound contextvars / kwargs that
+ * structlog produced. The renderer keeps both — `line` for display,
+ * `fields` / `logger` / `timestamp` for the diagnostic payload export
+ * and any future structured consumer.
+ */
 export const LogMessageSchema = z.object({
   type: z.literal('log'),
   line: z.string(),
-  level: z.string().optional()
+  level: z.string().optional(),
+  logger: z.string().optional(),
+  timestamp: z.string().optional(),
+  fields: z.record(z.string(), z.string()).optional()
 })
 export type LogMessage = z.infer<typeof LogMessageSchema>
 

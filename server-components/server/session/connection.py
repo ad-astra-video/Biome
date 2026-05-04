@@ -37,12 +37,13 @@ from recording.video_recorder import RecordingProperties, VideoRecorder
 from server.protocol import (
     ErrorMessage,
     FrameHeader,
+    LogMessage,
     MessageId,
     StageId,
     StatusMessage,
     WarningMessage,
 )
-from util.server_logging import TeeStream
+from util.server_logging import LogBroadcast
 
 if TYPE_CHECKING:
     from engine.manager import WorldEngineManager
@@ -122,7 +123,7 @@ class Connection:
     frame_queue: Queue[BaseModel | bytes] = field(default_factory=lambda: Queue(maxsize=16))
     frame_ready: asyncio.Event = field(init=False)
     progress_queue: asyncio.Queue[StatusMessage] = field(init=False)
-    log_queue: asyncio.Queue[str] = field(init=False)
+    log_queue: asyncio.Queue[LogMessage] = field(init=False)
     main_loop: asyncio.AbstractEventLoop = field(init=False)
 
     # ─── Control input (receiver writes, generator reads) ──────────
@@ -334,12 +335,12 @@ class Connection:
     ) -> None:
         """End-of-session cleanup. Cancels per-connection tasks, unhooks
         the engine progress callback, ends recorder segments, drops the
-        TeeStream registration, and logs the disconnect summary. Safe to
+        LogBroadcast registration, and logs the disconnect summary. Safe to
         call from `finally` whether or not the session reached game-loop."""
         for task in tasks:
             if task is not None:
                 task.cancel()
-        TeeStream.unregister_client(self.log_queue)
+        LogBroadcast.unregister_client(self.log_queue)
         if world_engine is not None:
             world_engine.set_progress_callback(None)
         self.end_action_log_segment()

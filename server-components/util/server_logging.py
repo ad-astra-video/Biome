@@ -17,12 +17,11 @@ import os
 import signal
 import sys
 import threading
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 import structlog
-from structlog.types import Processor
+from structlog.types import EventDict, Processor
 
 from server.protocol import LogMessage
 
@@ -38,26 +37,15 @@ _log_file_lock = threading.Lock()
 
 
 class TeeStream:
-    """Mirror stdout/stderr to a file while broadcasting complete lines to WebSocket clients."""
-
-    _client_queues: ClassVar[list[tuple[asyncio.Queue, asyncio.AbstractEventLoop]]] = []
-    _client_queues_lock: ClassVar[threading.Lock] = threading.Lock()
-
-    @classmethod
-    def register_client(cls, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> None:
-        with cls._client_queues_lock:
-            cls._client_queues.append((queue, loop))
-
-    @classmethod
-    def unregister_client(cls, queue: asyncio.Queue) -> None:
-        with cls._client_queues_lock:
-            cls._client_queues = [(q, ev_loop) for q, ev_loop in cls._client_queues if q is not queue]
+    """Mirror stdout/stderr to the canonical server.log file. The
+    WebSocket broadcast path used to live here as well — it now lives
+    on `LogBroadcast` below and is fed directly from a structlog
+    processor (so each event ships its structured fields, not just the
+    rendered string)."""
 
     def __init__(self, stream, log_fp):
         self._stream = stream
         self._log_fp = log_fp
-        self._line_buf = ""
-        self._buf_lock = threading.Lock()
 
     def write(self, data):
         written = self._stream.write(data)
@@ -65,29 +53,7 @@ class TeeStream:
             with _log_file_lock:
                 self._log_fp.write(data)
                 self._log_fp.flush()
-            self._broadcast(data)
         return written
-
-    @staticmethod
-    def _ensure_timestamp(line: str) -> str:
-        """Prepend an HH:MM:SS timestamp if the line doesn't already start with one."""
-        if len(line) >= 8 and line[2] == ":" and line[5] == ":":
-            return line
-        return f"{time.strftime('%H:%M:%S')} {line}"
-
-    def _broadcast(self, data: str) -> None:
-        with self._buf_lock:
-            self._line_buf += data
-            while "\n" in self._line_buf:
-                line, self._line_buf = self._line_buf.split("\n", 1)
-                line = line.rstrip("\r")
-                if not line:
-                    continue
-                line = TeeStream._ensure_timestamp(line)
-                with TeeStream._client_queues_lock:
-                    for queue, loop in TeeStream._client_queues:
-                        with contextlib.suppress(asyncio.QueueFull, RuntimeError):
-                            loop.call_soon_threadsafe(queue.put_nowait, line)
 
     def flush(self):
         self._stream.flush()
@@ -103,6 +69,34 @@ class TeeStream:
     @property
     def encoding(self):
         return getattr(self._stream, "encoding", "utf-8")
+
+
+class LogBroadcast:
+    """Fan-out for structured log events to every connected WS client.
+    Fed by `_capture_for_broadcast` in the structlog pipeline; drained by
+    `stream_logs_to_client` per connection. Decoupled from TeeStream so
+    each client gets the full structured `LogMessage` rather than a
+    pre-rendered text line."""
+
+    _client_queues: ClassVar[list[tuple[asyncio.Queue[LogMessage], asyncio.AbstractEventLoop]]] = []
+    _client_queues_lock: ClassVar[threading.Lock] = threading.Lock()
+
+    @classmethod
+    def register_client(cls, queue: asyncio.Queue[LogMessage], loop: asyncio.AbstractEventLoop) -> None:
+        with cls._client_queues_lock:
+            cls._client_queues.append((queue, loop))
+
+    @classmethod
+    def unregister_client(cls, queue: asyncio.Queue[LogMessage]) -> None:
+        with cls._client_queues_lock:
+            cls._client_queues = [(q, ev_loop) for q, ev_loop in cls._client_queues if q is not queue]
+
+    @classmethod
+    def push(cls, msg: LogMessage) -> None:
+        with cls._client_queues_lock:
+            for queue, loop in cls._client_queues:
+                with contextlib.suppress(asyncio.QueueFull, RuntimeError):
+                    loop.call_soon_threadsafe(queue.put_nowait, msg)
 
 
 # ---------------------------------------------------------------------------
@@ -138,13 +132,50 @@ _PRE_CHAIN: list[Processor] = [
     structlog.processors.TimeStamper(fmt="%H:%M:%S"),
 ]
 
+# Single shared renderer instance — used by `_capture_for_broadcast` to
+# render the human-readable line that goes into `LogMessage.line`, and as
+# the final processor in the pipeline that ships the same string to
+# stdlib's logger (and on to TeeStream → file/stdout).
+_console_renderer = structlog.dev.ConsoleRenderer(colors=False)
+
+
+def _capture_for_broadcast(_logger, _method_name: str, event_dict: EventDict) -> EventDict:
+    """Snapshot the structured event for the WS broadcast queue, then
+    pass through to the renderer.
+
+    Runs after the pre-chain (so `event_dict` already has level / logger
+    / timestamp / merged contextvars) and before `_console_renderer`. We
+    render the line here so the broadcast message and the stdout line
+    are byte-identical, then return the original event_dict for the
+    final renderer to produce the same text again — Python doesn't let
+    us return both a string and a dict from the same processor without
+    breaking the pipeline contract."""
+    snapshot = dict(event_dict)
+    line = _console_renderer(_logger, _method_name, dict(event_dict))
+    reserved = {"event", "level", "logger", "timestamp", "exc_info", "exception"}
+    fields = {k: str(v) for k, v in snapshot.items() if k not in reserved}
+    LogBroadcast.push(
+        LogMessage(
+            line=str(line),
+            level=str(snapshot.get("level", "info")),
+            logger=snapshot.get("logger"),
+            timestamp=snapshot.get("timestamp"),
+            fields=fields or None,
+        )
+    )
+    return event_dict
+
+
 structlog.configure(
     processors=[
         *_PRE_CHAIN,
         # `format_exc_info` materialises tracebacks before render so
         # `log.exception(...)` lands the formatted traceback in the message.
         structlog.processors.format_exc_info,
-        structlog.dev.ConsoleRenderer(colors=False),
+        # Side-effect: ship the structured event to WS clients before
+        # the final renderer reduces it to a string.
+        _capture_for_broadcast,
+        _console_renderer,
     ],
     wrapper_class=structlog.stdlib.BoundLogger,
     logger_factory=structlog.stdlib.LoggerFactory(),
@@ -229,19 +260,24 @@ def read_log_tail_lines(max_lines: int) -> list[str]:
 
 
 async def stream_logs_to_client(conn: "Connection") -> None:
-    """Replay the recent log tail, then attach to TeeStream for live updates,
-    pushing each line as a typed `LogMessage` over the WebSocket.
+    """Replay the recent log tail, then attach to LogBroadcast for live updates,
+    pushing each event as a typed `LogMessage` over the WebSocket.
 
-    Run as an asyncio task; cancel to stop. The TeeStream registration is
+    Historical lines from the log file are replayed without structured fields
+    (the file only stores rendered text); live events arrive with full
+    `level` / `logger` / `timestamp` / `fields` populated by the structlog
+    pipeline.
+
+    Run as an asyncio task; cancel to stop. The LogBroadcast registration is
     lifted by `Connection.teardown` (so cancellation timing doesn't matter)."""
     try:
         for line in read_log_tail_lines(LOG_TAIL_INITIAL_LINES):
             await conn.send_message(LogMessage(line=line))
-        TeeStream.register_client(conn.log_queue, conn.main_loop)
+        LogBroadcast.register_client(conn.log_queue, conn.main_loop)
 
         while True:
-            line = await conn.log_queue.get()
-            await conn.send_message(LogMessage(line=line))
+            msg = await conn.log_queue.get()
+            await conn.send_message(msg)
     except asyncio.CancelledError:
         pass
     except Exception as e:  # noqa: BLE001  -- websocket send/queue can fail with a wide variety of errors; we just want to stop cleanly without recursing through logger

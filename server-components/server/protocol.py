@@ -298,12 +298,26 @@ class WarningMessage(BaseModel):
 
 
 class LogMessage(BaseModel):
-    """A line of server log output, mirrored to connected clients."""
+    """One emitted server-side log event, mirrored to connected clients.
+
+    `line` is the human-readable rendering used by the renderer's terminal
+    UI as-is. The remaining fields are the structured form: the logger
+    name, the rendered timestamp, the bound contextvars / kwargs that
+    structlog produced. The renderer keeps both — `line` for display,
+    `fields` / `logger` / `timestamp` for the diagnostic payload export
+    and any future structured consumer."""
 
     model_config = _FrozenStrict
     type: Literal["log"] = "log"
     line: str
     level: str = "info"
+    logger: str | None = None
+    timestamp: str | None = None
+    # Field values land here as scalars (str / int / float / bool); we
+    # serialize via `str()` at capture time so the wire shape stays a
+    # uniform `dict[str, str]` and the renderer can render every field
+    # without per-type formatting.
+    fields: dict[str, str] | None = None
 
 
 ServerPushMessage = Annotated[
