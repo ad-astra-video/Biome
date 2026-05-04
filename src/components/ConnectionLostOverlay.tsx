@@ -25,7 +25,6 @@ const ConnectionLostOverlay = () => {
   }
 
   const buildPayload = useCallback(() => {
-    const logs = errorDetail ? [...wsAllLogs, { event: errorDetail, level: 'error' }] : wsAllLogs
     return buildDiagnosticsPayload({
       connection,
       error: {
@@ -33,7 +32,7 @@ const ConnectionLostOverlay = () => {
         stage: statusStage,
         connection_state: 'disconnected'
       },
-      logs,
+      serverLogs: wsAllLogs,
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,

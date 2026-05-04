@@ -214,8 +214,17 @@ export type DiagnosticsPayload = {
   error: DiagnosticsError
   /** Server resource state at the moment of error, or null if unavailable. */
   state_at_error?: DiagnosticsStateAtError | null
-  /** Tail of the server/engine log, most recent last. */
-  logs: LogRecord[]
+  /** Tail of Electron-process log records (`getLogger` events plus
+   *  subprocess pass-through that flowed through `parseLogLine`).
+   *  Pulled from the rolling buffer in `electron/lib/logger.ts` so the
+   *  export captures Electron-only events that don't broadcast onto
+   *  the `engine-log` channel (`electron.update`, `electron.settings`,
+   *  `engine.diagnostics`, …). */
+  electron_logs: LogRecord[]
+  /** Tail of server-side WS-broadcast log events (Python's structlog
+   *  output).  Empty pre-connect; in standalone mode this is the same
+   *  stream the on-screen log panel shows. */
+  server_logs: LogRecord[]
 }
 
 export type ExportDiagnosticsResult = {
@@ -303,6 +312,7 @@ export type IpcCommandMap = {
   'write-spark-tuning': { args: [tuning: PortalSparksTuning]; return: void }
   'get-runtime-diagnostics-meta': { args: []; return: RuntimeDiagnosticsMeta }
   'get-system-diagnostics': { args: []; return: SystemDiagnostics }
+  'get-electron-log-tail': { args: []; return: LogRecord[] }
   'export-loading-diagnostics': { args: [reportText: string]; return: ExportDiagnosticsResult }
 
   // Updates

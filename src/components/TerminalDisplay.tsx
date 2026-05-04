@@ -25,8 +25,17 @@ type TerminalDisplayProps = {
 
 const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   const { t } = useTranslation()
-  const { connectionState, statusStage, isFreshInstall, engineError, error, cancelConnection, wsLogs, connection } =
-    useStreaming()
+  const {
+    connectionState,
+    statusStage,
+    isFreshInstall,
+    engineError,
+    error,
+    cancelConnection,
+    wsLogs,
+    wsAllLogs,
+    connection
+  } = useStreaming()
   const { setErrorMode } = useVortex()
   const { isServerMode, settings } = useSettings()
   const { logs: engineLogs } = useEngineLogs(!isServerMode)
@@ -88,7 +97,9 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   }
 
   const buildPayload = useCallback(() => {
-    const logs = errorDetail ? [...activeLogs, { event: errorDetail, level: 'error' }] : activeLogs
+    // Builder pulls the Electron-process log tail itself; we just hand
+    // it the WS-side history. The error message is captured separately
+    // in `error.message`, so no synthetic log record is needed.
     return buildDiagnosticsPayload({
       connection,
       error: {
@@ -97,7 +108,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
         progress_percent: progressPercent,
         connection_state: connectionState
       },
-      logs,
+      serverLogs: wsAllLogs,
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,
@@ -105,7 +116,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
       }
     })
   }, [
-    activeLogs,
+    wsAllLogs,
     connection,
     connectionState,
     errorDetail,

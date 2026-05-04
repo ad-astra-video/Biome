@@ -95,9 +95,6 @@ export function registerServerIpc(): void {
       serverEnv.C_INCLUDE_PATH = existingCPath ? `${pythonIncludeDir}:${existingCPath}` : pythonIncludeDir
     }
 
-    // Create log file path
-    const logFilePath = path.join(engineDir, 'server.log')
-
     // Base args for the server. Note that we use localhost for the host to prevent
     // the Windows firewall for asking for permissions to expose the server to
     // the world
@@ -118,21 +115,22 @@ export function registerServerIpc(): void {
 
     const pid = child.pid
     log.info('Server process spawned', { fields: { pid: pid ?? -1 } })
-    fs.writeFileSync(logFilePath, '', 'utf-8')
 
     // Rolling tail of recent stdout+stderr, drained from the line readers below.
     // Kept in memory so the exit handler and immediate-crash path don't need to
     // re-read the log file.
     const recentLines: string[] = []
     const handleLine = (line: string, isStderr: boolean) => {
-      // Subprocess pass-through: write the raw line to our stdout (the
-      // line is already structured if it came from structlog; otherwise
-      // it's raw text from uvicorn / pre-init Python).  The same line
-      // also flows through `parseLogLine` for the renderer-bound IPC,
-      // which handles JSON parsing + fallback uniformly.
+      // Subprocess pass-through.  We write the raw line to our own
+      // stdout/stderr (so the dev's terminal sees Python's output) and
+      // forward a parsed `LogRecord` onto the `engine-log` IPC channel
+      // for the renderer's on-screen log panel.  We do NOT record it
+      // into the Electron rolling buffer or write it to `server.log` —
+      // both would duplicate Python's own work: structlog already owns
+      // the WS broadcast (→ `wsAllLogs` → diagnostic `server_logs`)
+      // and `TeeStream` already mirrors stdout/stderr into `server.log`.
       const sink = isStderr ? process.stderr : process.stdout
       sink.write(line + '\n')
-      fs.appendFileSync(logFilePath, line + '\n', 'utf-8')
       emitToAllWindows('engine-log', parseLogLine(line, isStderr, 'engine.server'))
       recentLines.push(line)
       if (recentLines.length > LOG_TAIL_MAX_LINES) recentLines.shift()

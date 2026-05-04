@@ -84,7 +84,43 @@ function renderTextLine(record: LogRecord): string {
   return line
 }
 
+/** Rolling buffer of `LogRecord`s produced on the Electron side.
+ *  Pulled on demand by the `get-electron-log-tail` IPC for diagnostic
+ *  exports.  Independent of the `engine-log` IPC broadcast (which is
+ *  the user-curated subset that shows in the renderer's on-screen log
+ *  panel), so internal-debug events like `engine.diagnostics:
+ *  check-engine-status: validating uv binary` end up here too.
+ *
+ *  Populated by:
+ *  - `emit` (every `getLogger(...).<level>(...)` call), and
+ *  - the uv-sync subprocess pass-through in `engine/ipc/engine.ts`,
+ *    whose output exists nowhere else.
+ *
+ *  *Not* populated by the Python-server subprocess pass-through —
+ *  Python's structlog already broadcasts each event over the WS
+ *  (→ `wsAllLogs` → diagnostic `server_logs`) and `read_log_tail_records`
+ *  replays the file tail on connect, so recording subprocess lines
+ *  here would just duplicate the WS-sourced records. */
+const RECENT_LOGS_MAX = 2000
+const _recentLogs: LogRecord[] = []
+
+/** Append a record to the rolling buffer, dropping the oldest entry
+ *  once the cap is hit so the buffer stays bounded across long
+ *  sessions.  Called from `emit` automatically; the uv-sync line
+ *  stream calls it explicitly. */
+export function recordElectronLog(record: LogRecord): void {
+  _recentLogs.push(record)
+  if (_recentLogs.length > RECENT_LOGS_MAX) _recentLogs.shift()
+}
+
+/** Snapshot of the current rolling buffer.  Returns a copy so the
+ *  caller can iterate safely while new events keep coming in. */
+export function getRecentElectronLogs(): LogRecord[] {
+  return [..._recentLogs]
+}
+
 function emit(record: LogRecord, broadcast: boolean): void {
+  recordElectronLog(record)
   const line = LOG_FORMAT === 'json' ? JSON.stringify(record) : renderTextLine(record)
   // stderr for warning+error so process supervisors see severity correctly;
   // stdout for info/debug.

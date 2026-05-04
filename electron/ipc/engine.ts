@@ -10,7 +10,7 @@ import { runUvSyncWithMirroredLogs } from '../lib/uvSync.js'
 import { copyServerComponentFiles, ensureEngineFont } from '../lib/serverFiles.js'
 import { emitToAllWindows } from '../lib/ipcUtils.js'
 import { parseLogLine } from '../lib/logRecord.js'
-import { getLogger } from '../lib/logger.js'
+import { getLogger, recordElectronLog } from '../lib/logger.js'
 import { getOfflineEnv } from './settings.js'
 
 // `engine.setup` covers the user-visible phases (install uv, sync deps,
@@ -82,7 +82,13 @@ async function syncEngineDependencies(signal?: AbortSignal): Promise<void> {
     {
       signal,
       onLine: (line, isStderr) => {
-        emitToAllWindows('engine-log', parseLogLine(line, isStderr, 'engine.uv-sync'))
+        // uv sync output exists nowhere else (Python's `server.log`
+        // covers the Python server's own stdout, not uv's), so we
+        // record it into the rolling buffer here so the diagnostic
+        // export captures install-time errors.
+        const record = parseLogLine(line, isStderr, 'engine.uv-sync')
+        recordElectronLog(record)
+        emitToAllWindows('engine-log', record)
       }
     }
   )
