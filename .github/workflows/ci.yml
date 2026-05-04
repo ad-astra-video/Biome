@@ -67,6 +67,12 @@ jobs:
       - name: Run basedpyright
         run: uvx basedpyright .
 
+      # Drift gate: `src/types/protocol.generated.ts` must match what the
+      # codegen would produce from the current `server/protocol.py`. PRs
+      # that change the protocol must include the regenerated TS file.
+      - name: Verify protocol codegen is up to date
+        run: uv run python scripts/codegen_ts.py --check
+
   build:
     strategy:
       fail-fast: false
