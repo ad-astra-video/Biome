@@ -74,6 +74,14 @@ export function registerServerIpc(): void {
       PYTHONUNBUFFERED: '1',
       PYTHONFAULTHANDLER: '1',
       BIOME_SERVER_LOG_PATH: path.join(engineDir, 'server.log'),
+      // Pin the standalone-spawned server to JSON output regardless of what
+      // the parent shell has set.  In standalone mode the child's stdout is
+      // consumed by `parseLogLine` for the renderer's engine-log buffer; if
+      // the dev sets `BIOME_LOG_FORMAT=text` in their shell, the inherited
+      // value would degrade engineLogs to text-only fallback records.  The
+      // dev's terminal still gets the JSON via our raw pass-through write,
+      // so dropping into `jq` recovers the human-readable form when needed.
+      BIOME_LOG_FORMAT: 'json',
       ...getOfflineEnv()
     }
 
