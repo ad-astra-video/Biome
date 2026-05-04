@@ -32,6 +32,22 @@ All must pass before a commit lands. The typed Pydantic boundaries in `server/pr
 
 Ruff's `TRY003` flags long messages passed to bare `RuntimeError` / `ValueError`. Define a typed subclass in the same module instead — see `EngineNotLoadedError`, `ModelUriRequiredError`, `UnsupportedModelTypeError`, `VlmNotLoadedError`, `KleinPipelineNotLoadedError`, `NoToolCallsError`, `VlmToolCallRetryError`. The class owns the message and (where useful) carries structured payload fields the catch site can inspect.
 
+### Structured logging
+
+Server-side logs go through `structlog` (configured once in `util/server_logging.py`). Get a logger with `log = structlog.stdlib.get_logger(__name__)` at the top of each module — the module name is the scope, and an event renders as:
+
+```
+12:34:56 [info     ] Loading model                  [engine.manager] client_host=127.0.0.1 model=waypoint-1.5 current_step=1 total_steps=3
+```
+
+- **Pass dynamic data as kwargs, not f-strings.** `logger.info("Loading seed", filename=name)` over `logger.info(f"Loading seed {name}")`. The renderer prints them as `key=value`; the WS broadcast and diagnostics export keep them as a structured `dict`.
+- **Per-connection scope.** The WS endpoint wraps each session in `structlog.contextvars.bound_contextvars(client_host=...)` so every event under that connection auto-tags `client_host`. Asyncio tasks inherit the contextvars; the generator thread is wired explicitly via `contextvars.copy_context()` (see `server/session/workers.run_generator`).
+- **Sub-operation scope.** Inside a routine that owns a multi-step operation, bind once with `log = logger.bind(operation="reset")` and re-use `log` for the rest of that scope. Use `current_step=N, total_steps=TOTAL` (with `TOTAL` as a module-level constant — see `LOAD_ENGINE_TOTAL_STEPS` / `WARMUP_TOTAL_STEPS` in `engine/manager.py`) rather than `[1/3]` in the message text.
+- **No bracketed prefixes** (`[ENGINE]`, `[RECV]`, `[GENERATE_SCENE]`, …). The logger name and bound contextvars already carry scope; if the current scope isn't enough, bind another contextvar or `operation` rather than re-introducing prefixes.
+- **Broadcast and file mirroring are split.** `LogBroadcast` is fed by a structlog processor and fans each event out as a typed `LogMessage` (rendered line + level + logger + timestamp + fields) to every connected WS client. `TeeStream` only mirrors stdout/stderr into `server.log`.
+
+A future port to Rust's `tracing` should map cleanly: spans ↔ contextvars, fields ↔ kwargs, the `tracing_subscriber` console layer ↔ `ConsoleRenderer`.
+
 ### Logging exceptions
 
 Prefer `logger.exception("...")` over `logger.error("...", exc_info=True)` — ruff's `TRY400` enforces this so the traceback always logs. The exception is a status notice where the traceback is noise: timeouts, recovery success/failure messages, an `error()` immediately followed by `raise CustomError() from e`. Suppress per-line with `# noqa: TRY400  -- <reason>` and keep `.error(...)`.
@@ -176,7 +192,7 @@ The renderer connects to the World Engine at `ws(s)://{host}/ws`. All messages a
 - `status` — `{stage: StageId, message?}`; the engine reports progress through every stage in `protocol.StageId`
 - `system_info` — one-shot hardware identity broadcast right after handshake
 - `error` / `warning` — see [Server error messages](#server-error-messages) below
-- `log` — server log line `{line, level}`
+- `log` — structured log event `{line, level, logger?, timestamp?, fields?}` — `line` is the rendered text for display, the rest is the structlog snapshot. The renderer mirrors this shape as `LogRecord` (`src/types/ipc.ts`) for both `wsLogs` and engine-log IPC events, and rides it through to the diagnostics export so external triagers see the structured form, not just rendered text.
 - (binary) — JPEG frame with a `FrameHeader` JSON prefix
 
 **Client→server notifications** (fire-and-forget, no `req_id`):
