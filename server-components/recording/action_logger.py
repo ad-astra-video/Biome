@@ -16,6 +16,7 @@ JSON without separators tweaks.
 """
 
 import datetime
+import logging
 import tempfile
 import threading
 import time
@@ -24,7 +25,7 @@ from typing import IO, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from util.server_logging import logger
+logger = logging.getLogger(__name__)
 
 ACTION_LOG_DIR = Path(tempfile.gettempdir())
 

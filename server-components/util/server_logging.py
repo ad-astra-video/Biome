@@ -111,7 +111,13 @@ _hosted_log_fp = open(SERVER_LOG_FILE, "w", encoding="utf-8", buffering=1)  # no
 sys.stdout = TeeStream(sys.stdout, _hosted_log_fp)
 sys.stderr = TeeStream(sys.stderr, _hosted_log_fp)
 
-_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+# Format includes `%(name)s` so every log line shows the logger it came
+# through. Each module uses `logger = logging.getLogger(__name__)`, so the
+# name is the dotted module path (e.g. `engine.manager`,
+# `server.session.workers`). `[client_host]` / `[1/3]` / `[RECV]` style
+# prefixes inside messages are kept for per-event context that the module
+# name doesn't capture.
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] [%(name)s] %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
 
 logging.basicConfig(
@@ -120,7 +126,7 @@ logging.basicConfig(
     datefmt=_LOG_DATEFMT,
     stream=sys.stdout,
 )
-logger = logging.getLogger("biome_server")
+logger = logging.getLogger(__name__)
 
 # Route uvicorn's loggers through our standard format.
 for _uv_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):

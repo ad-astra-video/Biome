@@ -15,13 +15,16 @@ and consumes them directly. Anything device-specific routes through
 
 # pyright: reportMissingTypeStubs=none
 
+import logging
+
 import cpuinfo
 import psutil
 import torch
 
 from engine import devices
 from server.protocol import ErrorSnapshot, SystemInfo
-from util.server_logging import logger
+
+logger = logging.getLogger(__name__)
 
 
 def _collect_system_info() -> tuple[SystemInfo, devices.NvmlHandle | None]:

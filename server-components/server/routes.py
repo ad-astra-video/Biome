@@ -30,6 +30,7 @@ take only what they need rather than reaching through a god object.
 
 import asyncio
 import contextlib
+import logging
 import os
 from typing import Annotated, Literal
 
@@ -44,9 +45,10 @@ from server.session.connection import Connection
 from server.session.handlers import build_init_response_data, prepare_session, run_preinit_handshake
 from server.session.workers import run_session
 from server.startup import ServerStartup
-from util.server_logging import logger, stream_logs_to_client
+from util.server_logging import stream_logs_to_client
 from util.system_info import SystemMonitor
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -251,7 +253,7 @@ async def websocket_endpoint(
 
     except WebSocketDisconnect:
         logger.info(f"[{client_host}] WebSocket disconnected")
-    except Exception as e:  # noqa: BLE001  -- top-level WebSocket guard; anything past this raises out of FastAPI's route
+    except Exception as e:
         # Uvicorn may surface client close as ClientDisconnected instead
         # of WebSocketDisconnect — treat both as normal disconnects to
         # avoid noisy tracebacks during intentional reconnects.

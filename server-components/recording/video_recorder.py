@@ -14,6 +14,7 @@ preset, yuv420p output, +faststart, no audio.
 
 import contextlib
 import datetime
+import logging
 import subprocess
 import tempfile
 import threading
@@ -24,7 +25,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, ConfigDict
 
-from util.server_logging import logger
+logger = logging.getLogger(__name__)
 
 DEFAULT_VIDEO_DIR = Path(tempfile.gettempdir())
 

@@ -11,14 +11,17 @@ definitions live in `server/routes.py`.
 
 import argparse
 import asyncio
+import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+import util.server_logging  # noqa: F401  # pyright: ignore[reportUnusedImport]  -- side-effect: install TeeStream + crash hooks before any logging happens
 from server.protocol import StageId
 from util.hf_token import apply_resolved_token
-from util.server_logging import logger
+
+logger = logging.getLogger(__name__)
 
 logger.info(f"Python {sys.version}")
 logger.info("Starting server...")
@@ -57,7 +60,7 @@ class ParentWatchdog:
         try:
             os.kill(self.parent_pid, 0)
         except OSError:
-            logger.error(f"Parent process (PID {self.parent_pid}) is already gone, shutting down")
+            logger.error(f"Parent process (PID {self.parent_pid}) is already gone, shutting down")  # noqa: TRY400  -- OSError is a "parent gone" signal, not a real exception; traceback is noise
             os._exit(1)
 
     async def run(self) -> None:
@@ -67,7 +70,7 @@ class ParentWatchdog:
             try:
                 os.kill(self.parent_pid, 0)  # signal 0 = existence check
             except OSError:
-                logger.error(f"Parent process (PID {self.parent_pid}) is gone, shutting down")
+                logger.error(f"Parent process (PID {self.parent_pid}) is gone, shutting down")  # noqa: TRY400  -- OSError is a "parent gone" signal, not a real exception; traceback is noise
                 os._exit(1)
 
 
@@ -166,7 +169,7 @@ async def _heavy_init(app: FastAPI, startup: ServerStartup) -> None:
 
         startup.mark_done()
 
-    except Exception as exc:  # noqa: BLE001  -- top-level lifespan guard; any heavy-init failure must be reported, not propagated
+    except Exception as exc:
         logger.error(f"[SERVER] Startup failed: {exc}", exc_info=True)
         startup.mark_failed(str(exc))
 
