@@ -5,7 +5,16 @@ import { WsRpcClient } from '../lib/wsRpc'
 import type { StageId } from '../stages'
 import { toWebSocketUrl } from '../utils/serverUrl'
 import { TranslatableError, type TranslationKey } from '../i18n'
-import type { ErrorSnapshot, InitRequest, InitResponseData, SystemInfo } from '../types/protocol.generated'
+import type {
+  ErrorMessage,
+  ErrorSnapshot,
+  FrameHeader,
+  InitRequest,
+  InitResponseData,
+  SystemInfo,
+  WarningMessage
+} from '../types/protocol.generated'
+import type { ServerMessage } from '../lib/wsRpc'
 import type { ServerCode } from '../types/input'
 
 const log = createLogger('WebSocket')
@@ -106,15 +115,13 @@ export const useWebSocket = (): WebSocketHook => {
   const [temporalCompression, setTemporalCompression] = useState(1)
   const rpcRef = useRef(new WsRpcClient())
   const resolveServerMessage = useCallback(
-    (msg: Record<string, unknown>, fallbackKey: TranslationKey): TranslatableError => {
-      const messageId = msg.message_id as string | undefined
-      const detail = msg.message as string | undefined
-      if (messageId) {
-        const key = messageId as TranslationKey
-        const params = (msg.params as Record<string, string>) ?? {}
+    (msg: ErrorMessage | WarningMessage, fallbackKey: TranslationKey): TranslatableError => {
+      const detail = msg.message
+      if (msg.message_id) {
+        const params = msg.params ?? {}
         // Forward raw detail as `message` param — keys that include
         // `{{message}}` surface it; keys that don't just ignore it.
-        return new TranslatableError(key, detail ? { ...params, message: detail } : params)
+        return new TranslatableError(msg.message_id, detail ? { ...params, message: detail } : params)
       }
       const message = detail ?? JSON.stringify(msg)
       return new TranslatableError(fallbackKey, { message })
@@ -189,46 +196,36 @@ export const useWebSocket = (): WebSocketHook => {
       ws.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
         if (wsRef.current !== ws) return
 
-        // Binary messages: [4-byte LE header_len][JSON header][image bytes]
-        // If header contains req_id → RPC response; otherwise → frame
+        // Binary messages: [4-byte LE header_len][FrameHeader JSON][JPEG bytes]
+        // The server sends every frame envelope through `FrameHeader.model_dump_json`,
+        // so the wire shape matches the generated `FrameHeader` type.
         if (event.data instanceof ArrayBuffer) {
           const view = new DataView(event.data)
           const headerLen = view.getUint32(0, true)
           const headerBytes = new Uint8Array(event.data, 4, headerLen)
-          const header = JSON.parse(new TextDecoder().decode(headerBytes)) as Record<string, unknown>
+          const header = JSON.parse(new TextDecoder().decode(headerBytes)) as FrameHeader
           const imageBlob = new Blob([new Uint8Array(event.data, 4 + headerLen)], { type: 'image/jpeg' })
 
-          // Binary RPC response
-          if (header.req_id != null) {
-            rpc.handleBinaryResponse(header, imageBlob)
-            return
-          }
-
-          // Binary frame
-          const headerTemporalCompression = (header.temporal_compression as number) ?? 1
+          const headerTemporalCompression = header.temporal_compression ?? 1
           frameTemporalCompressionRef.current = headerTemporalCompression
           setTemporalCompression(headerTemporalCompression)
-          if (typeof header.gen_ms === 'number') {
-            frameGenMsRef.current = header.gen_ms
-            setGenTime(Math.round(header.gen_ms))
-          }
-          frameIdRef.current = (header.frame_id as number) ?? 0
+          frameGenMsRef.current = header.gen_ms
+          setGenTime(Math.round(header.gen_ms))
+          frameIdRef.current = header.frame_id
           // First display frame of each latent pass: update latent gen stats and GPU metrics
           if ((frameIdRef.current - 1) % headerTemporalCompression === 0) {
-            if (typeof header.gen_ms === 'number') {
-              setLatentGenMs(Math.round(header.gen_ms))
-            }
+            setLatentGenMs(Math.round(header.gen_ms))
             const runtime: RuntimeMetrics = {
-              vramUsedBytes: (header.vram_used_bytes as number) ?? -1,
-              gpuUtilPercent: (header.gpu_util_percent as number) ?? -1,
+              vramUsedBytes: header.vram_used_bytes ?? -1,
+              gpuUtilPercent: header.gpu_util_percent ?? -1,
               profile:
                 header.t_infer_ms != null
                   ? {
-                      inferMs: header.t_infer_ms as number,
-                      syncMs: header.t_sync_ms as number,
-                      encMs: header.t_enc_ms as number,
-                      metricsMs: header.t_metrics_ms as number,
-                      overheadMs: (header.t_overhead_ms as number) ?? 0
+                      inferMs: header.t_infer_ms,
+                      syncMs: header.t_sync_ms ?? 0,
+                      encMs: header.t_enc_ms ?? 0,
+                      metricsMs: header.t_metrics_ms ?? 0,
+                      overheadMs: header.t_overhead_ms ?? 0
                     }
                   : null
             }
@@ -237,67 +234,63 @@ export const useWebSocket = (): WebSocketHook => {
           setFrame(imageBlob)
           setHasRealFrame(true)
           setFrameId(frameIdRef.current)
-          if (typeof header.client_ts === 'number' && (header.client_ts as number) > 0) {
-            setInputLatency(Math.round(performance.now() - (header.client_ts as number)))
+          if (header.client_ts > 0) {
+            setInputLatency(Math.round(performance.now() - header.client_ts))
           }
           return
         }
 
+        let msg: ServerMessage
         try {
-          const msg = JSON.parse(event.data) as Record<string, unknown>
-
-          // Let RPC client consume response messages first
-          if (rpc.handleMessage(msg)) return
-
-          switch (msg.type) {
-            case 'status': {
-              const stageId = typeof msg.stage === 'string' ? msg.stage : null
-              if (stageId) {
-                setStatusStage(stageId as StageId)
-              }
-              if (stageId === 'session.ready') {
-                setIsReady(true)
-                isReadyRef.current = true
-              }
-              break
-            }
-            case 'stats': {
-              if (typeof msg.gentime === 'number') {
-                setGenTime(Math.round(msg.gentime))
-              }
-              if (typeof msg.frame === 'number') {
-                setFrameId(msg.frame)
-              }
-              break
-            }
-            case 'log': {
-              appendLog(stripAnsi(String(msg.line ?? '')))
-              break
-            }
-            case 'error': {
-              setError(resolveServerMessage(msg, 'app.server.fallbackError'))
-              setConnectionState('error')
-              const snapshot = msg.snapshot as ErrorSnapshot | undefined
-              if (snapshot) {
-                setConnection((prev) => ({ ...prev, lastErrorSnapshot: snapshot }))
-              }
-              break
-            }
-            case 'system_info': {
-              // Early push from server at connect time — arrives before init so
-              // the hardware identity is available even if the session crashes
-              // during model load / device warmup.
-              const { type: _, ...info } = msg
-              setConnection((prev) => ({ ...prev, systemInfo: info as unknown as SystemInfo }))
-              break
-            }
-            case 'warning':
-              break
-            default:
-              log.debug('Message:', msg.type, msg)
-          }
+          msg = JSON.parse(event.data) as ServerMessage
         } catch (err) {
           log.error('Failed to parse message:', err)
+          return
+        }
+
+        // RPC responses are routed via the type predicate; after this
+        // returns false, `msg` narrows to push-only variants and the
+        // exhaustive switch below catches a missing case at compile time.
+        if (rpc.handleMessage(msg)) return
+
+        switch (msg.type) {
+          case 'status': {
+            setStatusStage(msg.stage)
+            if (msg.stage === 'session.ready') {
+              setIsReady(true)
+              isReadyRef.current = true
+            }
+            break
+          }
+          case 'log': {
+            appendLog(stripAnsi(msg.line))
+            break
+          }
+          case 'error': {
+            setError(resolveServerMessage(msg, 'app.server.fallbackError'))
+            setConnectionState('error')
+            if (msg.snapshot) {
+              setConnection((prev) => ({ ...prev, lastErrorSnapshot: msg.snapshot ?? prev.lastErrorSnapshot }))
+            }
+            break
+          }
+          case 'system_info': {
+            // Early push from server at connect time — arrives before init so
+            // the hardware identity is available even if the session crashes
+            // during model load / device warmup.
+            const { type: _type, ...info } = msg
+            setConnection((prev) => ({ ...prev, systemInfo: info }))
+            break
+          }
+          case 'warning':
+            break
+          default: {
+            // Exhaustiveness gate: every variant of `ServerPushMessage` must
+            // have a case above. tsc errors here if we add a new push type
+            // to `protocol.py` without handling it.
+            const _exhaustive: never = msg
+            log.debug('Unhandled message:', _exhaustive)
+          }
         }
       }
 
