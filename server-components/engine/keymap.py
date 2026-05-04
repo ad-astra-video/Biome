@@ -13,6 +13,7 @@ can both reference it without `engine.manager` owning unrelated input
 constants.
 """
 
+
 def _build_button_codes() -> dict[str, int]:
     codes: dict[str, int] = {}
     # A-Z keys
