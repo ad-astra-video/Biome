@@ -385,19 +385,17 @@ class SceneAuthoringManager:
 
     # ─── Lifecycle ────────────────────────────────────────────────
 
-    async def configure_for_session(self, *, scene_authoring_requested: bool) -> bool:
+    async def configure_for_session(self, *, scene_authoring_requested: bool) -> None:
         """Bring the model state into line with what this session needs.
         Loads if requested-but-unloaded; unloads if loaded-but-unwanted.
-        Returns True iff a fresh load happened (so the caller can emit the
-        corresponding stage). Re-raises warmup failures."""
+        Re-raises warmup failures. Callers gate on `is_loaded` before
+        calling if they need to emit a load-in-progress stage."""
         if not scene_authoring_requested and self.is_loaded:
             logger.info("Scene authoring disabled — unloading model")
             await asyncio.to_thread(self.unload)
-            return False
+            return
         if scene_authoring_requested and not self.is_loaded:
             await self.warmup()
-            return True
-        return False
 
     async def warmup(self) -> None:
         """Load both the VLM and the editing pipeline onto the device. Each

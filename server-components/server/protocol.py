@@ -70,14 +70,12 @@ class StageId(StrEnum):
 
     SESSION_LOADING_MODEL = "session.loading_model.load"
     SESSION_LOADING_WEIGHTS = "session.loading_model.instantiate"
-    SESSION_LOADING_DONE = "session.loading_model.done"
 
     SESSION_WARMUP_RESET = "session.warmup.reset"
     SESSION_WARMUP_SEED = "session.warmup.seed"
     SESSION_WARMUP_COMPILE = "session.warmup.compile"
 
-    SESSION_INPAINTING_LOAD = "session.inpainting.load"
-    SESSION_INPAINTING_READY = "session.inpainting.ready"
+    SESSION_SCENE_AUTHORING_LOAD = "session.scene_authoring.load"
 
     SESSION_INIT_RESET = "session.init.reset"
     SESSION_INIT_SEED = "session.init.seed"

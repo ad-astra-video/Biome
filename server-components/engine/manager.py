@@ -443,7 +443,6 @@ class WorldEngineManager:
                 has_prompt_conditioning=cfg.has_prompt_conditioning,
             )
 
-            self._report_progress(StageId.SESSION_LOADING_DONE)
             self.model_uri = requested_model
             self.quant = requested_quant
 

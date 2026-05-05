@@ -354,7 +354,7 @@ export const useWebSocket = (): WebSocketHook => {
         setConnectionState('disconnected')
         setIsReady(false)
         // Preserve statusStage across close so a bug report captures where the
-        // server was in its init flow (e.g. "session.inpainting_load") when it
+        // server was in its init flow (e.g. "session.scene_authoring.load") when it
         // died.  It's overwritten by the next session's status messages on reconnect.
         setFrame(null)
         setHasRealFrame(false)

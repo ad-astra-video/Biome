@@ -426,12 +426,10 @@ const goose = {
         waiting_for_seed: 'Choosing a pond...',
         loading_model: {
           load: 'Loading model...',
-          instantiate: 'Loading model into memory...',
-          done: 'The goose has landed!'
+          instantiate: 'Loading model into memory...'
         },
-        inpainting: {
-          load: 'Loading pond authoring model...',
-          ready: 'Pond authoring model ready.'
+        scene_authoring: {
+          load: 'Loading Pond Authoring models...'
         },
         warmup: {
           reset: 'Stretching wings...',

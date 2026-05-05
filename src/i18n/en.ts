@@ -425,12 +425,10 @@ const en = {
         waiting_for_seed: 'Preparing scene...',
         loading_model: {
           load: 'Loading model...',
-          instantiate: 'Loading model into memory...',
-          done: 'Model loaded!'
+          instantiate: 'Loading model into memory...'
         },
-        inpainting: {
-          load: 'Loading scene authoring model...',
-          ready: 'Scene authoring model ready.'
+        scene_authoring: {
+          load: 'Loading Scene Authoring models...'
         },
         warmup: {
           reset: 'Preparing for warmup...',

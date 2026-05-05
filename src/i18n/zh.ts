@@ -411,12 +411,10 @@ const zh = {
         waiting_for_seed: '正在准备场景...',
         loading_model: {
           load: '正在加载模型...',
-          instantiate: '正在将模型载入内存...',
-          done: '模型已加载！'
+          instantiate: '正在将模型载入内存...'
         },
-        inpainting: {
-          load: '正在加载场景创作模型...',
-          ready: '场景创作模型已就绪。'
+        scene_authoring: {
+          load: '正在加载场景创作模型...'
         },
         warmup: {
           reset: '正在准备预热...',

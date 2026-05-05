@@ -315,19 +315,18 @@ async def prepare_session(
         # Bring the scene-authoring model state in line with what this session
         # needs. Loading happens BEFORE WorldEngine warmup so the compiled
         # device graphs see the model's memory already allocated.
+        # Emit the in-progress stage before the load so the user sees it
+        # while the (slow) load runs, not after.
+        if conn.scene_authoring_requested and not scene_authoring.is_loaded:
+            await conn.send_stage(StageId.SESSION_SCENE_AUTHORING_LOAD)
         try:
-            loaded = await scene_authoring.configure_for_session(
-                scene_authoring_requested=conn.scene_authoring_requested
-            )
+            await scene_authoring.configure_for_session(scene_authoring_requested=conn.scene_authoring_requested)
         except Exception as e:
             logger.error(f"Scene authoring warmup failed: {e}", exc_info=True)
             await conn.send_error(message_id=MessageId.SCENE_AUTHORING_MODEL_LOAD_FAILED, message=str(e))
             if conn.init_req_id:
                 await conn.send_message(rpc_err(conn.init_req_id, error_id=MessageId.SCENE_AUTHORING_MODEL_LOAD_FAILED))
             return False
-        if loaded:
-            await conn.send_stage(StageId.SESSION_INPAINTING_LOAD)
-            await conn.send_stage(StageId.SESSION_INPAINTING_READY)
 
         # Engine warmup (first connection only). Quantization-not-supported
         # is mapped from a raw torch error to a typed exception inside

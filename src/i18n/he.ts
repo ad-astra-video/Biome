@@ -417,12 +417,10 @@ const he = {
         waiting_for_seed: 'מכין סצנה...',
         loading_model: {
           load: 'טוען מודל...',
-          instantiate: 'טוען מודל לזיכרון...',
-          done: 'המודל נטען!'
+          instantiate: 'טוען מודל לזיכרון...'
         },
-        inpainting: {
-          load: 'טוען מודל יצירת סצנות...',
-          ready: 'מודל יצירת הסצנות מוכן.'
+        scene_authoring: {
+          load: 'טוען מודל יצירת סצנות...'
         },
         warmup: {
           reset: 'מתכונן לחימום...',

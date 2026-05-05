@@ -425,12 +425,10 @@ const ja = {
         waiting_for_seed: 'シーンを準備しています...',
         loading_model: {
           load: 'モデルを読み込んでいます...',
-          instantiate: 'モデルをメモリに読み込んでいます...',
-          done: 'モデルを読み込みました。'
+          instantiate: 'モデルをメモリに読み込んでいます...'
         },
-        inpainting: {
-          load: 'シーンオーサリングモデルを読み込んでいます...',
-          ready: 'シーンオーサリングモデルの準備ができました。'
+        scene_authoring: {
+          load: 'シーンオーサリングモデルを読み込んでいます...'
         },
         warmup: {
           reset: 'ウォームアップの準備をしています...',
