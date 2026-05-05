@@ -39,7 +39,7 @@ from engine.devices import SAFETY_DEVICE
 logger = structlog.stdlib.get_logger(__name__)
 
 
-_DEFAULT_CACHE_FILE = Path(__file__).parent.parent / "world_engine" / ".safety_cache.json"
+_DEFAULT_CACHE_FILE = Path(__file__).parent.parent / ".safety_cache.json"
 
 
 # ---------------------------------------------------------------------------
