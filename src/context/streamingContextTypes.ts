@@ -48,9 +48,6 @@ export type StreamingContextValue = {
   }
   server: ServerConnection
 
-  endpointUrl: string | null
-  setEndpointUrl: (url: string | null) => void
-
   /** Local engine state + actions. Only meaningful in standalone mode;
    *  in server mode the fields are inert (status null, isReady/isRunning
    *  false, setup is a no-op). */
@@ -110,14 +107,12 @@ export type StreamingContextValue = {
     }
   }
 
-  connect: (endpointUrl: string) => void
-  disconnect: () => void
-  logout: () => Promise<void>
+  /** Session lifecycle transitions consumers can fire. */
   dismissConnectionLost: () => Promise<void>
   reconnectAfterConnectionLost: () => Promise<void>
   cancelConnection: () => Promise<void>
   prepareReturnToMainMenu: () => Promise<void>
-  resetScene: () => void
+
   registerContainerRef: (element: HTMLDivElement | null) => void
   registerCanvasRef: (element: HTMLCanvasElement | null) => void
   handleContainerClick: () => void

@@ -55,7 +55,7 @@ const buildSessionConfig = async (settings: Settings, isStandaloneMode: boolean)
 }
 
 export const StreamingProvider = ({ children }: { children: ReactNode }) => {
-  const { state, states, transitionTo, shutdown } = usePortal()
+  const { state, states, transitionTo } = usePortal()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
@@ -122,7 +122,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const gamepadSensitivity = settings.gamepad_sensitivity
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
-  const [endpointUrl, setEndpointUrl] = useState<string | null>(null)
   const [canvasReady, setCanvasReady] = useState(false)
   const [loadingConnectionJobSeq, setLoadingConnectionJobSeq] = useState(0)
   const [pointerLockBlockedSeq, setPointerLockBlockedSeq] = useState(0)
@@ -430,7 +429,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       currentServerPort: serverPort,
       isStandaloneMode,
       offlineMode,
-      endpointUrl,
+      endpointUrl: null,
       serverUrl: settings.server_url,
       isServerRunning,
       checkServerReady,
@@ -712,14 +711,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [isStandaloneMode, isServerRunning, stopServer])
 
-  const logout = useCallback(async () => {
-    log.info('Logout initiated')
-    cleanupState()
-    await stopServerIfRunning()
-    await shutdown()
-    log.info('Logout complete')
-  }, [cleanupState, stopServerIfRunning, shutdown])
-
   const dismissConnectionLost = useCallback(async () => {
     log.info('Acknowledging connection lost overlay')
     setConnectionLost(false)
@@ -796,9 +787,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     },
     server,
 
-    endpointUrl,
-    setEndpointUrl,
-
     // Standalone engine state + actions
     engine: {
       status: engineStatus,
@@ -844,15 +832,13 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       }
     },
 
-    // Actions
-    connect,
-    disconnect,
-    logout,
+    // Lifecycle actions
     dismissConnectionLost,
     reconnectAfterConnectionLost,
     cancelConnection,
     prepareReturnToMainMenu,
-    resetScene,
+
+    // DOM refs
     registerContainerRef,
     registerCanvasRef,
     handleContainerClick
