@@ -1,6 +1,6 @@
 import { DEFAULT_WORLD_ENGINE_MODEL } from '../types/settings'
 import { TranslatableError } from '../i18n'
-import type { StreamingLifecycleEffects, StreamingLifecycleState } from './streamingLifecycleMachine'
+import type { StreamingLifecycleEffects } from './streamingLifecycleMachine'
 import type { PortalState } from './portalStateMachine'
 
 export const LIFECYCLE_EFFECT_ORDER: Array<keyof StreamingLifecycleEffects> = [
@@ -28,12 +28,13 @@ type PortalStatesLike = {
 
 type CreateHandlersArgs = {
   log: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void }
-  lifecycleState: StreamingLifecycleState
   settings: { engine_model?: string | null } | null
   setEngineError: (value: TranslatableError | null) => void
-  setWarmConnectionJobSeq: (value: number) => void
   warmBootstrapSentRef: { current: boolean }
-  warmFlowCancelledRef: { current: boolean }
+  /** Reads the warm-connection flow's cancellation state. The
+   *  loadingFailureError handler suppresses error reporting while
+   *  cancelled so a torn-down flow's late errors don't pollute the UI. */
+  isWarmFlowCancelled: () => boolean
   setConnectionLost: (value: boolean) => void
   setSettingsOpen: (value: boolean) => void
   pauseSession: () => void
@@ -53,12 +54,10 @@ type LifecycleEffectHandlers = {
 
 export const createStreamingLifecycleEffectHandlers = ({
   log,
-  lifecycleState,
   settings,
   setEngineError,
-  setWarmConnectionJobSeq,
   warmBootstrapSentRef,
-  warmFlowCancelledRef,
+  isWarmFlowCancelled,
   setConnectionLost,
   setSettingsOpen,
   pauseSession,
@@ -76,7 +75,7 @@ export const createStreamingLifecycleEffectHandlers = ({
       log.info('Intentional reconnect in loading state - suppressing engine error')
     },
     loadingFailureError: (info) => {
-      if (warmFlowCancelledRef.current) return
+      if (isWarmFlowCancelled()) return
       log.error('Connection error during loading state:', info)
       if (info) {
         if ('key' in info) {
@@ -89,7 +88,12 @@ export const createStreamingLifecycleEffectHandlers = ({
       }
     },
     clearEngineErrorOnLoadingEntry: () => setEngineError(null),
-    runLoadingConnection: () => setWarmConnectionJobSeq(lifecycleState.loadingConnectionRequestSeq),
+    // No-op handler: `useWarmConnection` subscribes to
+    // `lifecycleState.loadingConnectionRequestSeq` directly, so the
+    // reducer's bump signal is observed without going through this
+    // effect channel. The effect flag still fires; we just don't need
+    // to do anything in response.
+    runLoadingConnection: () => {},
     startIntentionalReconnect: () => {
       const selectedModel = settings?.engine_model || DEFAULT_WORLD_ENGINE_MODEL
       log.info('Model changed in settings while streaming - reconnecting to start a fresh session:', selectedModel)

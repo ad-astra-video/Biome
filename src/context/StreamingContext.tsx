@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useReducer, useMemo, type ReactNode } from 'react'
 import { usePortal } from './portalContextValue'
-import { runWarmConnectionFlow, toTranslatableError } from './streamingWarmConnection'
 import { TranslatableError } from '../i18n'
-import type { StageId } from '../stages'
 import { buildStreamingLifecycleSyncPayload } from './streamingLifecyclePayload'
 import { createStreamingLifecycleEffectHandlers, runStreamingLifecycleEffects } from './streamingLifecycleEffects'
 import {
@@ -29,6 +27,7 @@ import { useInputLoop } from '../hooks/streaming/useInputLoop'
 import { usePauseState } from '../hooks/streaming/usePauseState'
 import { usePointerLock } from '../hooks/streaming/usePointerLock'
 import { useSceneEdit } from '../hooks/streaming/useSceneEdit'
+import { useWarmConnection } from '../hooks/streaming/useWarmConnection'
 import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
 import { EngineContext, type EngineContextValue } from './streaming/engine'
 import { SessionContext, type SessionContextValue } from './streaming/session'
@@ -104,21 +103,41 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const gamepadSensitivity = settings.gamepad_sensitivity
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
-  const [loadingConnectionJobSeq, setLoadingConnectionJobSeq] = useState(0)
-  const [preConnectionStage, setPreConnectionStage] = useState<StageId | null>(null)
-  const [isFreshInstall, setIsFreshInstall] = useState(false)
   const [lifecycleState, dispatchLifecycle] = useReducer(streamingLifecycleReducer, initialStreamingLifecycleState)
 
   const lastAppliedModelRef = useRef<string | null>(null)
   const lastSeedRef = useRef<{ filename: string; imageData: string } | null>(null)
   const warmBootstrapSentRef = useRef(false)
-  const warmFlowCancelledRef = useRef(false)
 
-  // Once the WebSocket starts reporting its own stages, clear the pre-connection stage
+  const {
+    preConnectionStage,
+    isFreshInstall,
+    cancel: cancelWarmFlow,
+    isCancelled: isWarmFlowCancelled
+  } = useWarmConnection({
+    requestSeq: lifecycleState.loadingConnectionRequestSeq,
+    statusStage,
+    isStandaloneMode,
+    offlineMode: settings.offline_mode ?? false,
+    serverUrl: settings.server_url,
+    engine: {
+      serverPort,
+      isServerRunning,
+      startServer,
+      checkServerReady,
+      checkServerRunning,
+      checkPortInUse,
+      probeServerHealth,
+      getLastServerExitTail,
+      checkStatus: checkEngineStatus,
+      setupEngine
+    },
+    connect,
+    clearWsLogs,
+    onServerError: setEngineError
+  })
+
   const effectiveStatusStage = useMemo(() => statusStage ?? preConnectionStage, [statusStage, preConnectionStage])
-  useEffect(() => {
-    if (statusStage) setPreConnectionStage(null)
-  }, [statusStage])
 
   const hasReceivedFrame = frame !== null
   const isStreaming = state === states.STREAMING
@@ -314,63 +333,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     sceneEdit.graceActive
   ])
 
-  useEffect(() => {
-    if (loadingConnectionJobSeq === 0) return
-
-    warmFlowCancelledRef.current = false
-
-    const handleServerError = (err: TranslatableError) => {
-      if (warmFlowCancelledRef.current) return
-      log.error('Server error:', err)
-      setEngineError(err)
-      // Don't transition to main menu immediately - wait for user to dismiss the error
-    }
-
-    // Clear WS logs before starting a new connection
-    clearWsLogs()
-
-    const offlineMode = settings.offline_mode ?? false
-
-    runWarmConnectionFlow({
-      currentServerPort: serverPort,
-      isStandaloneMode,
-      offlineMode,
-      endpointUrl: null,
-      serverUrl: settings.server_url,
-      isServerRunning,
-      checkServerReady,
-      checkPortInUse,
-      checkServerRunning,
-      getLastServerExitTail,
-      probeServerHealthViaMain: probeServerHealth,
-      checkEngineStatus,
-      startServer,
-      setupEngine,
-      connect,
-      onServerError: handleServerError,
-      onStage: (stageId) => {
-        if (!warmFlowCancelledRef.current) setPreConnectionStage(stageId)
-      },
-      onFreshInstall: (isFresh) => {
-        if (!warmFlowCancelledRef.current) setIsFreshInstall(isFresh)
-      },
-      isCancelled: () => warmFlowCancelledRef.current,
-      log
-    }).catch((err) => {
-      if (warmFlowCancelledRef.current) return
-      handleServerError(toTranslatableError(err, offlineMode))
-    })
-
-    return () => {
-      warmFlowCancelledRef.current = true
-      setPreConnectionStage(null)
-      setIsFreshInstall(false)
-    }
-    // Only restart the warm-connection flow when a new job is requested; all other
-    // referenced values are read latest-at-call-time on purpose.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingConnectionJobSeq])
-
   useLoadingFailureCleanup({
     portalState: state,
     loadingState: states.LOADING,
@@ -391,12 +353,10 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     const { effects } = lifecycleState
     const handlers = createStreamingLifecycleEffectHandlers({
       log,
-      lifecycleState,
       settings,
       setEngineError,
-      setWarmConnectionJobSeq: setLoadingConnectionJobSeq,
       warmBootstrapSentRef,
-      warmFlowCancelledRef,
+      isWarmFlowCancelled,
       setConnectionLost,
       setSettingsOpen,
       pauseSession,
@@ -421,7 +381,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     sendPause,
     resume,
     pauseSession,
-    resumeSession
+    resumeSession,
+    isWarmFlowCancelled
   ])
 
   const { registerCanvas, canvasReady, frameTimelineRef } = useFrameRenderer({
@@ -439,13 +400,13 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
 
   // Cleanup helper for logout/dismiss
   const cleanupState = useCallback(() => {
-    warmFlowCancelledRef.current = true
+    cancelWarmFlow()
     exitPointerLock()
     disconnect()
     setEngineError(null)
     setSettingsOpen(false)
     resumeSession()
-  }, [exitPointerLock, disconnect, resumeSession])
+  }, [cancelWarmFlow, exitPointerLock, disconnect, resumeSession])
 
   const stopServerIfRunning = useCallback(async () => {
     if (isStandaloneMode && isServerRunning) {
