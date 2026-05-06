@@ -10,16 +10,8 @@ const MODAL_BUTTON = 'p-[0.5cqh_1.78cqh] text-[2.49cqh]'
 
 const ConnectionLostOverlay = () => {
   const { t } = useTranslation()
-  const {
-    connectionLost,
-    cancelConnection,
-    reconnectAfterConnectionLost,
-    server,
-    wsLogs,
-    wsAllLogs,
-    error,
-    statusStage
-  } = useStreaming()
+  const { connectionLost, cancelConnection, reconnectAfterConnectionLost, server, websocket, error, statusStage } =
+    useStreaming()
   const { settings, isServerMode } = useSettings()
 
   const errorDetail = error
@@ -42,14 +34,14 @@ const ConnectionLostOverlay = () => {
         stage: statusStage,
         connection_state: 'disconnected'
       },
-      serverLogs: wsAllLogs,
+      serverLogs: websocket.allLogs,
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,
         requestedQuant: settings.engine_quant ?? null
       }
     })
-  }, [server, wsAllLogs, errorDetail, statusStage, isServerMode, settings.engine_model, settings.engine_quant])
+  }, [server, websocket, errorDetail, statusStage, isServerMode, settings.engine_model, settings.engine_quant])
 
   return (
     <div
@@ -101,7 +93,7 @@ const ConnectionLostOverlay = () => {
           )}
         </div>
         <div className="h-[28cqh] w-full">
-          <ServerLogDisplay errorMessage={errorDetail} logs={wsLogs} buildDiagnosticsPayload={buildPayload} />
+          <ServerLogDisplay errorMessage={errorDetail} logs={websocket.logs} buildDiagnosticsPayload={buildPayload} />
         </div>
         <div className="flex w-full flex-wrap justify-end gap-[1.42cqh]">
           <Button

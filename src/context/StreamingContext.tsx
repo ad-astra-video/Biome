@@ -817,15 +817,18 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     },
 
     // Seeds
-    openSeedsDir,
-    seedsDir,
-    selectSeed,
+    seeds: {
+      dir: seedsDir,
+      openDir: openSeedsDir,
+      select: selectSeed
+    },
 
-    // WS RPC
-    wsRequest,
-    wsLogs,
-    wsAllLogs,
-    clearWsLogs,
+    websocket: {
+      request: wsRequest,
+      logs: wsLogs,
+      allLogs: wsAllLogs,
+      clearLogs: clearWsLogs
+    },
 
     // Input state
     input: {

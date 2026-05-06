@@ -3,8 +3,6 @@ import { useStreaming } from '../context/streamingContextValue'
 
 const VideoContainer = () => {
   const { isStreaming, session, registerContainerRef, registerCanvasRef, handleContainerClick, input } = useStreaming()
-  const isPaused = session.isPaused
-  const isPointerLocked = input.pointerLock.isLocked
 
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -21,9 +19,9 @@ const VideoContainer = () => {
     [registerCanvasRef]
   )
 
-  const cursorClass = isPointerLocked
+  const cursorClass = input.pointerLock.isLocked
     ? 'cursor-none'
-    : isPaused
+    : session.isPaused
       ? 'cursor-default'
       : isStreaming
         ? 'cursor-crosshair'
@@ -44,7 +42,7 @@ const VideoContainer = () => {
         height={720}
         className={`
           pointer-events-none absolute inset-0 size-full object-cover select-none
-          ${isPaused ? 'brightness-[0.8] saturate-[0.62]' : ''}
+          ${session.isPaused ? 'brightness-[0.8] saturate-[0.62]' : ''}
         `}
       />
     </div>

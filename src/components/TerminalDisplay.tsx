@@ -25,12 +25,11 @@ type TerminalDisplayProps = {
 
 const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   const { t } = useTranslation()
-  const { connectionStatus, statusStage, isFreshInstall, error, cancelConnection, wsLogs, wsAllLogs, server } =
-    useStreaming()
+  const { connectionStatus, statusStage, isFreshInstall, error, cancelConnection, websocket, server } = useStreaming()
   const { setErrorMode } = useVortex()
   const { isServerMode, settings } = useSettings()
   const { logs: engineLogs } = useEngineLogs(!isServerMode)
-  const activeLogs = isServerMode ? wsLogs : engineLogs
+  const activeLogs = isServerMode ? websocket.logs : engineLogs
   const [showLogsPanel, setShowLogsPanel] = useState(false)
   const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false)
   const [exportStatus, setExportStatus] = useState<string | null>(null)
@@ -96,7 +95,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
         progress_percent: progressPercent,
         connection_state: connectionStatus.kind
       },
-      serverLogs: wsAllLogs,
+      serverLogs: websocket.allLogs,
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,
@@ -104,7 +103,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
       }
     })
   }, [
-    wsAllLogs,
+    websocket,
     server,
     connectionStatus,
     errorDetail,

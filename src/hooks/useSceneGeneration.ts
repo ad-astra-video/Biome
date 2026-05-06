@@ -21,7 +21,7 @@ type UseSceneGenerationOptions = {
 
 export function useSceneGeneration({ refreshSeeds, isActive, setLastAddedFilename }: UseSceneGenerationOptions) {
   const { t } = useTranslation()
-  const { wsRequest } = useStreaming()
+  const { websocket } = useStreaming()
   const { settings } = useSettings()
   const [generateState, setGenerateState] = useState<GenerateState>('idle')
   const [generateError, setGenerateError] = useState<string | null>(null)
@@ -49,7 +49,7 @@ export function useSceneGeneration({ refreshSeeds, isActive, setLastAddedFilenam
       setGenerateError(null)
       setLastAddedFilename(null)
       try {
-        const response = await wsRequest('generate_scene', { prompt }, 60_000)
+        const response = await websocket.request('generate_scene', { prompt }, 60_000)
         if (settings.scene_authoring_save_generated ?? true) {
           try {
             const record = await invoke('save-generated-seed', response.image_jpeg_base64)
@@ -73,7 +73,7 @@ export function useSceneGeneration({ refreshSeeds, isActive, setLastAddedFilenam
         setGenerateError(msg)
       }
     },
-    [wsRequest, t, settings.scene_authoring_save_generated, refreshSeeds, setLastAddedFilename]
+    [websocket, t, settings.scene_authoring_save_generated, refreshSeeds, setLastAddedFilename]
   )
 
   return {

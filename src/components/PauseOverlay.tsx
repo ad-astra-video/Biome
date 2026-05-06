@@ -15,8 +15,8 @@ import { useSettings } from '../hooks/settingsContextValue'
 import { FocusScope } from '../context/FocusScopeContext'
 
 const PauseOverlayContent = () => {
-  const { input, wsRequest, selectSeed } = useStreaming()
-  const requestPointerLock = input.pointerLock.request
+  const streaming = useStreaming()
+  const requestPointerLock = streaming.input.pointerLock.request
   const { settings } = useSettings()
   const pauseMenuCode = settings.keybindings.pauseMenu
   const [view, setView] = useState<PauseViewKey>(PAUSE_VIEW.MAIN)
@@ -37,7 +37,7 @@ const PauseOverlayContent = () => {
     handleImageDrop,
     handleClipboardUpload
   } = useSeedManager({
-    wsRequest,
+    wsRequest: streaming.websocket.request,
     isActive: true,
     onPinnedSceneRemoved: (filename: string) => removeScene(filename),
     // Upload / drop / paste: set the CTA first so it's visible even if things
@@ -49,7 +49,7 @@ const PauseOverlayContent = () => {
       const last = filenames[filenames.length - 1]
       setLastAddedFilename(last)
       if (filenames.length === 1) {
-        void selectSeed(last).then(() => requestPointerLock())
+        void streaming.seeds.select(last).then(() => requestPointerLock())
       }
     }
   })

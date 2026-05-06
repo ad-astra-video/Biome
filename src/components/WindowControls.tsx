@@ -41,14 +41,13 @@ const WindowControlButton = ({
 const WindowControls = () => {
   const { minimize, toggleMaximize, close } = useWindow()
   const { isStreaming, session } = useStreaming()
-  const isPaused = session.isPaused
   const dragRegionStyle = {
     WebkitAppRegion: 'drag',
     WebkitUserSelect: 'none',
     userSelect: 'none'
   } as CSSProperties
 
-  const hidden = isStreaming && !isPaused
+  const hidden = isStreaming && !session.isPaused
 
   return (
     <div className="absolute inset-x-0 top-0 z-9998 h-10" style={dragRegionStyle}>

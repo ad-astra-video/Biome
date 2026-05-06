@@ -11,15 +11,14 @@ import { ALLOW_USER_SCENES } from '../constants'
  *   and {@link ALLOW_USER_SCENES} is on.
  */
 export function useSceneActions(handleClipboardUpload: () => Promise<string[]>, pasteEnabled = true) {
-  const { selectSeed, input } = useStreaming()
-  const requestPointerLock = input.pointerLock.request
+  const { seeds, input } = useStreaming()
 
   const selectScene = useCallback(
     async (filename: string) => {
-      await selectSeed(filename)
-      requestPointerLock()
+      await seeds.select(filename)
+      input.pointerLock.request()
     },
-    [selectSeed, requestPointerLock]
+    [seeds, input]
   )
 
   const pasteScene = useCallback(async () => {

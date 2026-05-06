@@ -14,7 +14,6 @@ const AudioController = () => {
   const { play, fadeOutLoop, crossfadeLoop, stopAllLoops } = useAudio()
   const { state, states } = usePortal()
   const { error, session } = useStreaming()
-  const isPaused = session.isPaused
   const prevHasErrorRef = useRef(false)
   // Manage ambient loops based on portal state
   useEffect(() => {
@@ -37,12 +36,12 @@ const AudioController = () => {
   // Swap between gameplay and pause music with crossfade
   useEffect(() => {
     if (state !== states.STREAMING) return
-    if (isPaused) {
+    if (session.isPaused) {
       crossfadeLoop('music_gameplay', 'music_pause', MUSIC_FADE_S)
     } else {
       crossfadeLoop('music_pause', 'music_gameplay', MUSIC_FADE_S)
     }
-  }, [isPaused, state, states, crossfadeLoop])
+  }, [session.isPaused, state, states, crossfadeLoop])
 
   // On error during loading: play error sound
   useEffect(() => {

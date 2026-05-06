@@ -20,7 +20,7 @@ type DebugTabProps = {
 
 const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }, ref) => {
   const { t } = useTranslation()
-  const { server, wsAllLogs } = useStreaming()
+  const { server, websocket } = useStreaming()
   const isServerMode = settings.engine_mode === ENGINE_MODES.SERVER
   const [menuPerformanceStats, setMenuPerformanceStats] = useState(settings.debug_overlays.performance_stats)
   const [menuInputOverlay, setMenuInputOverlay] = useState(settings.debug_overlays.input)
@@ -52,7 +52,7 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
       const payload = await buildDiagnosticsPayload({
         server,
         error: { message: null },
-        serverLogs: wsAllLogs,
+        serverLogs: websocket.allLogs,
         session: {
           engineMode: isServerMode ? 'server' : 'standalone',
           requestedModel: settings.engine_model ?? null,
@@ -64,7 +64,7 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
     } catch {
       setDiagnosticsStatus(t('app.settings.debugMetrics.copyFailed'))
     }
-  }, [server, wsAllLogs, isServerMode, settings.engine_model, settings.engine_quant, t])
+  }, [server, websocket, isServerMode, settings.engine_model, settings.engine_quant, t])
 
   return (
     <div className={active ? 'flex flex-col gap-[2.3cqh]' : 'hidden'}>

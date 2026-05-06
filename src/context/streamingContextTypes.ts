@@ -74,13 +74,22 @@ export type StreamingContextValue = {
     }
   }
 
-  openSeedsDir: () => Promise<void>
-  seedsDir: string | null
-  selectSeed: (filename: string) => Promise<void>
-  wsRequest: WsRequest
-  wsLogs: LogRecord[]
-  wsAllLogs: LogRecord[]
-  clearWsLogs: () => void
+  /** Seed images on disk (default + uploaded). */
+  seeds: {
+    dir: string | null
+    openDir: () => Promise<void>
+    select: (filename: string) => Promise<void>
+  }
+
+  /** WebSocket-side affordances: typed RPC client + log buffers. */
+  websocket: {
+    request: WsRequest
+    /** Visible-in-UI tail (capped at MAX_VISIBLE_LOG_LINES). */
+    logs: LogRecord[]
+    /** Full session-scoped log history (uncapped, used by diagnostics export). */
+    allLogs: LogRecord[]
+    clearLogs: () => void
+  }
 
   /** Live input state (held inputs + pointer lock). */
   input: {
