@@ -23,6 +23,7 @@ import useSeedsDir from '../hooks/useSeedsDir'
 import { invoke } from '../bridge'
 import { createLogger } from '../utils/logger'
 import { buildSessionConfig } from './streaming/sessionConfig'
+import { useFrameRenderer } from './streaming/useFrameRenderer'
 import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
 import { EngineContext, type EngineContextValue } from './streaming/engine'
 import { SessionContext, type SessionContextValue } from './streaming/session'
@@ -41,7 +42,6 @@ const UNLOCK_DELAY_MS = 1250
 export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const { state, states, transitionTo } = usePortal()
   const containerRef = useRef<HTMLDivElement | null>(null)
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
   const { settings, isStandaloneMode, engineMode } = useSettings()
   const {
@@ -106,7 +106,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const gamepadSensitivity = settings.gamepad_sensitivity
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
-  const [canvasReady, setCanvasReady] = useState(false)
   const [loadingConnectionJobSeq, setLoadingConnectionJobSeq] = useState(0)
   const [pointerLockBlockedSeq, setPointerLockBlockedSeq] = useState(0)
   const [preConnectionStage, setPreConnectionStage] = useState<StageId | null>(null)
@@ -513,113 +512,10 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     runStreamingLifecycleEffects({ effects, handlers })
   }, [lifecycleState, transitionTo, states, disconnect, settings, exitPointerLock, sendPause, resume])
 
-  // Render frames to canvas using createImageBitmap for off-main-thread decoding.
-  // Decoded bitmaps are queued with a target displayAt timestamp so multiframe
-  // bundles are spread evenly across the generation interval regardless of display
-  // refresh rate (avoids front-loading 4 frames at 144 Hz then stalling).
-  const bitmapQueueRef = useRef<{ bitmap: ImageBitmap; displayAt: number; frameId: number; genMs: number }[]>([])
-  const lastScheduledAtRef = useRef<number>(0)
-  // Batch-relative timeline for the frame timeline overlay.
-  // slotDisplayAts[i] holds the actual scheduled displayAt for each frame in the
-  // current 4-frame bundle. Updated when bitmaps are ready (not at effect time),
-  // so values are always based on real decode completion times.
-  const frameTimelineRef = useRef<{ currentIndex: number; slotDisplayAts: (number | null)[] }>({
-    currentIndex: 0,
-    slotDisplayAts: []
+  const { registerCanvas, canvasReady, frameTimelineRef } = useFrameRenderer({
+    frame,
+    refs: { gen: frameGenMsRef, compression: frameTemporalCompressionRef, id: frameIdRef }
   })
-  const drawRafRef = useRef<number | null>(null)
-
-  // rAF draw loop: draws the next bitmap only once its scheduled time has arrived
-  useEffect(() => {
-    if (!canvasReady || !canvasRef.current) return
-
-    const canvas = canvasRef.current
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-
-    const drawTick = () => {
-      const now = performance.now()
-      // Defense-in-depth: if the queue has grown well beyond one batch worth
-      // of lead (e.g. rAF was paused while the window was backgrounded), drop
-      // the oldest bitmaps and snap the scheduling cursor back to now so new
-      // frames display live instead of replaying stale history.
-      const tc = frameTemporalCompressionRef.current
-      const maxQueue = Math.max(tc * 2, 8)
-      if (bitmapQueueRef.current.length > maxQueue) {
-        const keep = Math.max(tc, 4)
-        const dropCount = bitmapQueueRef.current.length - keep
-        for (let i = 0; i < dropCount; i++) {
-          bitmapQueueRef.current.shift()!.bitmap.close()
-        }
-        lastScheduledAtRef.current = 0
-      }
-      const item = bitmapQueueRef.current[0]
-      if (item && now >= item.displayAt) {
-        bitmapQueueRef.current.shift()
-        frameTimelineRef.current.currentIndex = item.frameId % frameTemporalCompressionRef.current
-        ctx.clearRect(0, 0, canvas.width, canvas.height)
-        ctx.drawImage(item.bitmap, 0, 0, canvas.width, canvas.height)
-        item.bitmap.close()
-      }
-      drawRafRef.current = requestAnimationFrame(drawTick)
-    }
-    drawRafRef.current = requestAnimationFrame(drawTick)
-
-    return () => {
-      if (drawRafRef.current !== null) cancelAnimationFrame(drawRafRef.current)
-      for (const item of bitmapQueueRef.current) item.bitmap.close()
-      bitmapQueueRef.current = []
-      lastScheduledAtRef.current = 0
-    }
-  }, [canvasReady, frameTemporalCompressionRef])
-
-  // Decode incoming frames off-thread and push to the draw queue.
-  // displayAt is computed inside the .then() callback — i.e. once the bitmap is
-  // actually ready — so that if all 4 decodes finish simultaneously the
-  // lastScheduledAtRef chain still spaces them correctly, and no frame is
-  // scheduled in the past just because decode was slow.
-  useEffect(() => {
-    if (!frame || !canvasReady) return
-
-    const temporalCompression = frameTemporalCompressionRef.current
-    const genMs = frameGenMsRef.current / temporalCompression
-    const capturedFrameId = frameIdRef.current
-
-    const source =
-      frame instanceof Blob
-        ? Promise.resolve(frame)
-        : fetch(frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`).then((r) => r.blob())
-
-    source
-      .then((blob) => createImageBitmap(blob))
-      .then((bitmap) => {
-        const now = performance.now()
-        // Display immediately when the queue is caught up (first frame of a new
-        // batch), otherwise chain after the previously reserved slot.  The slot
-        // reservation (lastScheduledAtRef) always advances by genMs so that
-        // subsequent frames in the same batch are evenly spaced.
-        //
-        // Cap the forward lead: if the server bursts frames faster than the
-        // reported genMs (warmup, model switch, backgrounded window) the cursor
-        // can drift far into the future and latency accumulates without bound
-        // (Overworldai/Biome#79).  Allow up to ~2 batches of lead, so intra-
-        // batch spacing still works, but snap back if we overshoot.
-        const batchMs = Math.max(temporalCompression * genMs, 16)
-        const maxLeadMs = Math.max(2 * batchMs, 100)
-        const cappedBase = Math.min(lastScheduledAtRef.current, now + maxLeadMs)
-        const displayAt = Math.max(cappedBase, now)
-        lastScheduledAtRef.current = displayAt + genMs
-
-        const batchIndex = capturedFrameId % temporalCompression
-        if (batchIndex === 0) {
-          frameTimelineRef.current.slotDisplayAts = Array.from({ length: temporalCompression }, () => null)
-        }
-        frameTimelineRef.current.slotDisplayAts[batchIndex] = displayAt
-
-        bitmapQueueRef.current.push({ bitmap, displayAt, frameId: capturedFrameId, genMs })
-      })
-      .catch(() => {})
-  }, [frame, canvasReady, frameGenMsRef, frameIdRef, frameTemporalCompressionRef])
 
   // Input loop synced to requestAnimationFrame for minimal jitter
   useEffect(() => {
@@ -659,13 +555,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     }
   }, [inputEnabled, getInputState, sendControl, mouseSensitivity, gamepadSensitivity])
 
-  // Ref registration callbacks
   const registerContainerRef = useCallback((element: HTMLDivElement | null) => {
     containerRef.current = element
-  }, [])
-  const registerCanvasRef = useCallback((element: HTMLCanvasElement | null) => {
-    canvasRef.current = element
-    setCanvasReady(!!element)
   }, [])
 
   const handleContainerClick = useCallback(() => {
@@ -876,10 +767,10 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const surfaceValue = useMemo<SurfaceContextValue>(
     () => ({
       registerContainer: registerContainerRef,
-      registerCanvas: registerCanvasRef,
+      registerCanvas,
       handleContainerClick
     }),
-    [registerContainerRef, registerCanvasRef, handleContainerClick]
+    [registerContainerRef, registerCanvas, handleContainerClick]
   )
 
   // The provider stack has no functional ordering — the order below is
