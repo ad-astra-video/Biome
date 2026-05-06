@@ -115,8 +115,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const sceneEditActive = sceneEditState.phase !== 'inactive'
   const [sceneEditGrace, setSceneEditGrace] = useState(false)
   const [showStats, setShowStats] = useState(false)
-  const [mouseSensitivity, setMouseSensitivity] = useState(() => settings.mouse_sensitivity ?? 1.0)
-  const [gamepadSensitivity, setGamepadSensitivity] = useState(() => settings.gamepad_sensitivity ?? 1.0)
+  const mouseSensitivity = settings.mouse_sensitivity
+  const gamepadSensitivity = settings.gamepad_sensitivity
   const [fps, setFps] = useState(0)
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
@@ -832,12 +832,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     wsLogs,
     wsAllLogs,
     clearWsLogs,
-
-    // Settings
-    mouseSensitivity,
-    setMouseSensitivity,
-    gamepadSensitivity,
-    setGamepadSensitivity,
 
     // Input state
     pressedKeys,

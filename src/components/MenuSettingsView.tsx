@@ -38,8 +38,7 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
   const { t } = useTranslation()
   const { settings, saveSettings } = useSettings()
   const gamepadConnected = useGamepadConnected()
-  const { isStreaming, mouseSensitivity, setMouseSensitivity, gamepadSensitivity, setGamepadSensitivity } =
-    useStreaming()
+  const { isStreaming } = useStreaming()
   const volume = useVolumeControls()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')
@@ -79,21 +78,7 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
       offline_mode: menuOfflineMode,
       scene_authoring_enabled: menuSceneAuthoringEnabled
     })
-    if (keyboardDraft.mouse_sensitivity !== undefined) {
-      setMouseSensitivity(keyboardDraft.mouse_sensitivity)
-    }
-    if (gamepadDraft.gamepad_sensitivity !== undefined) {
-      setGamepadSensitivity(gamepadDraft.gamepad_sensitivity)
-    }
-  }, [
-    settings,
-    saveSettings,
-    volume,
-    menuSceneAuthoringEnabled,
-    menuOfflineMode,
-    setMouseSensitivity,
-    setGamepadSensitivity
-  ])
+  }, [settings, saveSettings, volume, menuSceneAuthoringEnabled, menuOfflineMode])
 
   const handleBackClick = useCallback(async () => {
     if (hasKeybindConflict) return
@@ -176,7 +161,6 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
               settings={settings}
               active={activeTab === 'keyboard'}
               menuSceneAuthoringEnabled={menuSceneAuthoringEnabled}
-              initialMouseSensitivityFallback={mouseSensitivity}
               onConflictChange={handleConflictChange}
             />
             <GamepadTab
@@ -185,7 +169,6 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
               active={activeTab === 'gamepad'}
               gamepadConnected={gamepadConnected}
               menuSceneAuthoringEnabled={menuSceneAuthoringEnabled}
-              initialSensitivityFallback={gamepadSensitivity}
             />
             <DebugTab ref={debugRef} settings={settings} active={activeTab === 'debug'} />
           </div>

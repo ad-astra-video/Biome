@@ -36,15 +36,14 @@ type KeyboardTabProps = {
   settings: Settings
   active: boolean
   menuSceneAuthoringEnabled: boolean
-  initialMouseSensitivityFallback: number
   onConflictChange: (hasConflict: boolean) => void
 }
 
 const KeyboardTab = forwardRef<KeyboardTabHandle, KeyboardTabProps>(
-  ({ settings, active, menuSceneAuthoringEnabled, initialMouseSensitivityFallback, onConflictChange }, ref) => {
+  ({ settings, active, menuSceneAuthoringEnabled, onConflictChange }, ref) => {
     const { t } = useTranslation()
     const [menuMouseSensitivity, setMenuMouseSensitivity] = useState(() =>
-      sensitivityToMenu(settings.mouse_sensitivity ?? initialMouseSensitivityFallback)
+      sensitivityToMenu(settings.mouse_sensitivity)
     )
     const [menuKeybindings, setMenuKeybindings] = useState<Keybindings>(() => ({ ...settings.keybindings }))
 

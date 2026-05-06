@@ -29,14 +29,13 @@ type GamepadTabProps = {
   active: boolean
   gamepadConnected: boolean
   menuSceneAuthoringEnabled: boolean
-  initialSensitivityFallback: number
 }
 
 const GamepadTab = forwardRef<GamepadTabHandle, GamepadTabProps>(
-  ({ settings, active, gamepadConnected, menuSceneAuthoringEnabled, initialSensitivityFallback }, ref) => {
+  ({ settings, active, gamepadConnected, menuSceneAuthoringEnabled }, ref) => {
     const { t } = useTranslation()
     const [menuGamepadSensitivity, setMenuGamepadSensitivity] = useState(() =>
-      sensitivityToMenu(settings.gamepad_sensitivity ?? initialSensitivityFallback)
+      sensitivityToMenu(settings.gamepad_sensitivity)
     )
 
     useImperativeHandle(

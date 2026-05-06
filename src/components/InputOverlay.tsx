@@ -271,9 +271,10 @@ const computeSimulatedKBM = (pressedGamepad: Set<InputCode>): Set<InputCode> => 
 }
 
 const InputOverlay = () => {
-  const { isStreaming, pressedKeys, mouseButtons, pressedGamepad, scrollActive, gamepadSensitivity } = useStreaming()
+  const { isStreaming, pressedKeys, mouseButtons, pressedGamepad, scrollActive } = useStreaming()
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.input
+  const gamepadSensitivity = settings.gamepad_sensitivity
 
   const mouseDeltaRef = useRef({ dx: 0, dy: 0 })
   const [mouseDelta, setMouseDelta] = useState({ dx: 0, dy: 0 })
