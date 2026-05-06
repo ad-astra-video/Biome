@@ -15,7 +15,6 @@ import useWebSocket, {
   isReady as wsIsReady,
   connectionError as wsConnectionError
 } from '../hooks/useWebSocket'
-import useGameInput from '../hooks/useGameInput'
 import { useSettings } from '../hooks/settingsContextValue'
 import { ENGINE_MODES, DEFAULT_WORLD_ENGINE_MODEL } from '../types/settings'
 import useEngineApi from '../hooks/useEngineApi'
@@ -24,6 +23,7 @@ import { invoke } from '../bridge'
 import { createLogger } from '../utils/logger'
 import { buildSessionConfig } from './streaming/sessionConfig'
 import { useFrameRenderer } from './streaming/useFrameRenderer'
+import { useInputLoop } from './streaming/useInputLoop'
 import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
 import { EngineContext, type EngineContextValue } from './streaming/engine'
 import { SessionContext, type SessionContextValue } from './streaming/session'
@@ -112,12 +112,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const [isFreshInstall, setIsFreshInstall] = useState(false)
   const [lifecycleState, dispatchLifecycle] = useReducer(streamingLifecycleReducer, initialStreamingLifecycleState)
 
-  const [scrollActive, setScrollActive] = useState({ up: false, down: false })
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const prevEngineModeRef = useRef(engineMode)
   const prevOfflineModeRef = useRef(settings.offline_mode ?? false)
-  const inputLoopRef = useRef<number | null>(null)
   const lastAppliedModelRef = useRef<string | null>(null)
   const lastSeedRef = useRef<{ filename: string; imageData: string } | null>(null)
   const warmBootstrapSentRef = useRef(false)
@@ -345,14 +341,17 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     dispatchSceneEdit({ type: 'OPEN' })
   }, [exitPointerLock])
 
-  const { pressedKeys, mouseButtons, pressedGamepad, getInputState, isPointerLocked } = useGameInput(
-    inputEnabled,
+  const { pressedKeys, mouseButtons, pressedGamepad, scrollActive, isPointerLocked } = useInputLoop({
+    enabled: inputEnabled,
     containerRef,
-    handleReset,
-    settings.keybindings,
-    settings.scene_authoring_enabled ? handleSceneEdit : null,
-    exitPointerLock
-  )
+    keybindings: settings.keybindings,
+    mouseSensitivity,
+    gamepadSensitivity,
+    sendControl,
+    onReset: handleReset,
+    onSceneEdit: settings.scene_authoring_enabled ? handleSceneEdit : null,
+    onExitPointerLock: exitPointerLock
+  })
 
   useEffect(() => {
     dispatchLifecycle({
@@ -516,44 +515,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     frame,
     refs: { gen: frameGenMsRef, compression: frameTemporalCompressionRef, id: frameIdRef }
   })
-
-  // Input loop synced to requestAnimationFrame for minimal jitter
-  useEffect(() => {
-    if (!inputEnabled) {
-      if (inputLoopRef.current) {
-        cancelAnimationFrame(inputLoopRef.current)
-        inputLoopRef.current = null
-      }
-      return
-    }
-
-    const tick = () => {
-      const { buttons, mouse, gamepad } = getInputState()
-      const scrollUp = buttons.includes('SCROLL_UP')
-      const scrollDown = buttons.includes('SCROLL_DOWN')
-      if (scrollUp || scrollDown) {
-        setScrollActive({ up: scrollUp, down: scrollDown })
-        if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current)
-        scrollTimeoutRef.current = setTimeout(() => setScrollActive({ up: false, down: false }), 150)
-      }
-      const dx = mouse.dx * mouseSensitivity + gamepad.dx * gamepadSensitivity
-      const dy = mouse.dy * mouseSensitivity + gamepad.dy * gamepadSensitivity
-      sendControl(buttons, Math.round(dx), Math.round(dy))
-      inputLoopRef.current = requestAnimationFrame(tick)
-    }
-    inputLoopRef.current = requestAnimationFrame(tick)
-
-    return () => {
-      if (inputLoopRef.current) {
-        cancelAnimationFrame(inputLoopRef.current)
-        inputLoopRef.current = null
-      }
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current)
-        scrollTimeoutRef.current = null
-      }
-    }
-  }, [inputEnabled, getInputState, sendControl, mouseSensitivity, gamepadSensitivity])
 
   const registerContainerRef = useCallback((element: HTMLDivElement | null) => {
     containerRef.current = element
