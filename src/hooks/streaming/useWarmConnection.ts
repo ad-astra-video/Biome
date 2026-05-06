@@ -26,9 +26,9 @@ type WarmEngineDeps = Pick<
 }
 
 /** Drives the warm-connection flow that runs whenever the lifecycle
- *  enters LOADING. Re-runs each time `requestSeq` changes (the
- *  lifecycle reducer increments it on portal-state entry into
- *  LOADING, including for intentional reconnects).
+ *  enters LOADING. The lifecycle effect handler calls `run()` to fire
+ *  the flow; the hook owns the trigger counter internally so we don't
+ *  pollute the provider with mirror state.
  *
  *  The flow may need to be cancelled imperatively from outside —
  *  `cleanupState` and the intentional-reconnect lifecycle effect both
@@ -37,10 +37,6 @@ type WarmEngineDeps = Pick<
  *  surfacing state, so a late-arriving error from a cancelled flow
  *  doesn't pollute the UI. */
 export function useWarmConnection(opts: {
-  /** Bump signal — the flow runs each time this changes, skipping the
-   *  initial 0 value. Sourced from
-   *  `lifecycleState.loadingConnectionRequestSeq`. */
-  requestSeq: number
   /** Once the server starts reporting its own stages over the WS,
    *  this hook's `preConnectionStage` (set during the pre-WS warm-up
    *  steps — uv install, port scan, etc.) is stale. The hook watches
@@ -62,21 +58,15 @@ export function useWarmConnection(opts: {
 }): {
   preConnectionStage: StageId | null
   isFreshInstall: boolean
+  /** Trigger a fresh warm-connection attempt. The lifecycle effects
+   *  call this on LOADING-state entry. */
+  run: () => void
   cancel: () => void
   isCancelled: () => boolean
 } {
-  const {
-    requestSeq,
-    statusStage,
-    isStandaloneMode,
-    offlineMode,
-    serverUrl,
-    engine,
-    connect,
-    clearWsLogs,
-    onServerError
-  } = opts
+  const { statusStage, isStandaloneMode, offlineMode, serverUrl, engine, connect, clearWsLogs, onServerError } = opts
 
+  const [trigger, setTrigger] = useState(0)
   const [preConnectionStage, setPreConnectionStage] = useState<StageId | null>(null)
   const [isFreshInstall, setIsFreshInstall] = useState(false)
   const cancelledRef = useRef(false)
@@ -87,7 +77,7 @@ export function useWarmConnection(opts: {
   }, [statusStage])
 
   useEffect(() => {
-    if (requestSeq === 0) return
+    if (trigger === 0) return
 
     cancelledRef.current = false
     clearWsLogs()
@@ -133,16 +123,17 @@ export function useWarmConnection(opts: {
       setPreConnectionStage(null)
       setIsFreshInstall(false)
     }
-    // Only restart on a new request — every other input is read latest-
+    // Only restart on a new trigger — every other input is read latest-
     // at-call-time on purpose so a settings change mid-flow doesn't
     // tear it down.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestSeq])
+  }, [trigger])
 
+  const run = () => setTrigger((t) => t + 1)
   const cancel = () => {
     cancelledRef.current = true
   }
   const isCancelled = () => cancelledRef.current
 
-  return { preConnectionStage, isFreshInstall, cancel, isCancelled }
+  return { preConnectionStage, isFreshInstall, run, cancel, isCancelled }
 }

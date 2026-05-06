@@ -1,13 +1,6 @@
-import { useState, useEffect, useRef, useCallback, useReducer, useMemo, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from 'react'
 import { usePortal } from './portalContextValue'
 import { TranslatableError } from '../i18n'
-import { buildStreamingLifecycleSyncPayload } from './streamingLifecyclePayload'
-import { createStreamingLifecycleEffectHandlers, runStreamingLifecycleEffects } from './streamingLifecycleEffects'
-import {
-  initialStreamingLifecycleState,
-  streamingLifecycleReducer,
-  STREAMING_LIFECYCLE_EVENT
-} from './streamingLifecycleMachine'
 import useWebSocket, {
   isConnected as wsIsConnected,
   isReady as wsIsReady,
@@ -25,6 +18,7 @@ import { usePauseState } from '../hooks/streaming/usePauseState'
 import { usePointerLock } from '../hooks/streaming/usePointerLock'
 import { useSceneEdit } from '../hooks/streaming/useSceneEdit'
 import { useSessionInit } from '../hooks/streaming/useSessionInit'
+import { useStreamingLifecycle } from '../hooks/streaming/useStreamingLifecycle'
 import { useWarmConnection } from '../hooks/streaming/useWarmConnection'
 import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
 import { EngineContext, type EngineContextValue } from './streaming/engine'
@@ -101,15 +95,14 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const gamepadSensitivity = settings.gamepad_sensitivity
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
-  const [lifecycleState, dispatchLifecycle] = useReducer(streamingLifecycleReducer, initialStreamingLifecycleState)
 
   const {
     preConnectionStage,
     isFreshInstall,
+    run: runWarmConnection,
     cancel: cancelWarmFlow,
     isCancelled: isWarmFlowCancelled
   } = useWarmConnection({
-    requestSeq: lifecycleState.loadingConnectionRequestSeq,
     statusStage,
     isStandaloneMode,
     offlineMode: settings.offline_mode ?? false,
@@ -204,44 +197,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     onExitPointerLock: exitPointerLock
   })
 
-  useEffect(() => {
-    dispatchLifecycle({
-      type: STREAMING_LIFECYCLE_EVENT.SYNC,
-      payload: buildStreamingLifecycleSyncPayload({
-        portalState: state,
-        connectionStatus,
-        engineModel: settings?.engine_model,
-        lastAppliedModel,
-        engineError,
-        hasReceivedFrame,
-        // Init is considered complete once applyInitResponse has set model.
-        // Used to gate the LOADING → STREAMING transition so an error between
-        // session.ready and the init response doesn't leak us into streaming.
-        initCompleted: server.model !== null,
-        isPointerLocked,
-        settingsOpen,
-        isPaused,
-        sceneEditActive: sceneEdit.graceActive,
-        sceneAuthoringEnabled: settings.scene_authoring_enabled,
-        engineQuant: settings.engine_quant
-      })
-    })
-  }, [
-    state,
-    connectionStatus,
-    settings?.engine_model,
-    settings?.engine_quant,
-    settings.scene_authoring_enabled,
-    engineError,
-    hasReceivedFrame,
-    server.model,
-    isPointerLocked,
-    settingsOpen,
-    isPaused,
-    sceneEdit.graceActive,
-    lastAppliedModel
-  ])
-
   useLoadingFailureCleanup({
     portalState: state,
     loadingState: states.LOADING,
@@ -258,41 +213,39 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     sendPause(false)
   }, [sendPause, resumeSession])
 
-  useEffect(() => {
-    const { effects } = lifecycleState
-    const handlers = createStreamingLifecycleEffectHandlers({
-      log,
-      settings,
-      setEngineError,
-      resetSession,
-      isWarmFlowCancelled,
-      setConnectionLost,
-      setSettingsOpen,
-      pauseSession,
-      resumeSession,
-      disconnect,
-      transitionTo,
-      states,
-      exitPointerLock,
-      sendPause,
-      resume
-    })
-
-    runStreamingLifecycleEffects({ effects, handlers })
-  }, [
-    lifecycleState,
-    transitionTo,
+  useStreamingLifecycle({
+    portalState: state,
+    connectionStatus,
+    engineModel: settings?.engine_model,
+    engineQuant: settings.engine_quant,
+    sceneAuthoringEnabled: settings.scene_authoring_enabled,
+    lastAppliedModel,
+    engineError,
+    hasReceivedFrame,
+    // Init is considered complete once applyInitResponse has set the
+    // server model. Gates LOADING → STREAMING so an error between
+    // session.ready and the init response doesn't leak us into streaming.
+    initCompleted: server.model !== null,
+    isPointerLocked,
+    settingsOpen,
+    isPaused,
+    sceneEditActive: sceneEdit.graceActive,
     states,
-    disconnect,
     settings,
-    exitPointerLock,
-    sendPause,
-    resume,
+    setEngineError,
+    resetSession,
+    runWarmConnection,
+    isWarmFlowCancelled,
+    setConnectionLost,
+    setSettingsOpen,
     pauseSession,
     resumeSession,
-    resetSession,
-    isWarmFlowCancelled
-  ])
+    disconnect,
+    transitionTo,
+    exitPointerLock,
+    sendPause,
+    resume
+  })
 
   const { registerCanvas, canvasReady, frameTimelineRef } = useFrameRenderer({
     frame,

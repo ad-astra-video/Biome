@@ -34,6 +34,8 @@ type CreateHandlersArgs = {
    *  reducer needs the next LOADING entry to start from a clean
    *  bootstrap. */
   resetSession: () => void
+  /** Triggers a fresh warm-connection attempt. */
+  runWarmConnection: () => void
   /** Reads the warm-connection flow's cancellation state. The
    *  loadingFailureError handler suppresses error reporting while
    *  cancelled so a torn-down flow's late errors don't pollute the UI. */
@@ -59,6 +61,7 @@ export const createStreamingLifecycleEffectHandlers = ({
   settings,
   setEngineError,
   resetSession,
+  runWarmConnection,
   isWarmFlowCancelled,
   setConnectionLost,
   setSettingsOpen,
@@ -89,12 +92,7 @@ export const createStreamingLifecycleEffectHandlers = ({
       }
     },
     clearEngineErrorOnLoadingEntry: () => setEngineError(null),
-    // No-op handler: `useWarmConnection` subscribes to
-    // `lifecycleState.loadingConnectionRequestSeq` directly, so the
-    // reducer's bump signal is observed without going through this
-    // effect channel. The effect flag still fires; we just don't need
-    // to do anything in response.
-    runLoadingConnection: () => {},
+    runLoadingConnection: () => runWarmConnection(),
     startIntentionalReconnect: () => {
       const selectedModel = settings?.engine_model || DEFAULT_WORLD_ENGINE_MODEL
       log.info('Model changed in settings while streaming - reconnecting to start a fresh session:', selectedModel)
