@@ -21,14 +21,15 @@ import { useSceneEdit } from '../hooks/streaming/useSceneEdit'
 import { useSessionInit } from '../hooks/streaming/useSessionInit'
 import { useStreamingLifecycle } from '../hooks/streaming/useStreamingLifecycle'
 import { useWarmConnection } from '../hooks/streaming/useWarmConnection'
-import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
-import { EngineContext, type EngineContextValue } from './streaming/engine'
-import { SessionContext, type SessionContextValue } from './streaming/session'
-import { FramesContext, type FramesContextValue } from './streaming/frames'
-import { InputContext, type InputContextValue } from './streaming/input'
-import { SeedsContext, type SeedsContextValue } from './streaming/seeds'
-import { WebsocketContext, type WebsocketContextValue } from './streaming/websocket'
-import { SurfaceContext, type SurfaceContextValue } from './streaming/surface'
+import type { ConnectionContextValue } from './streaming/connection'
+import type { EngineContextValue } from './streaming/engine'
+import type { SessionContextValue } from './streaming/session'
+import type { FramesContextValue } from './streaming/frames'
+import type { InputContextValue } from './streaming/input'
+import type { SeedsContextValue } from './streaming/seeds'
+import type { WebsocketContextValue } from './streaming/websocket'
+import type { SurfaceContextValue } from './streaming/surface'
+import { StreamingProviders } from './streaming/StreamingProviders'
 
 const log = createLogger('Streaming')
 
@@ -419,25 +420,20 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     [registerContainerRef, registerCanvas, handleContainerClick]
   )
 
-  // The provider stack has no functional ordering — the order below is
-  // chosen so each context's intended audience reads naturally
-  // (connection at the outside, surface at the inside next to its
-  // VideoContainer consumer).
   return (
-    <ConnectionContext.Provider value={connectionValue}>
-      <EngineContext.Provider value={engineValue}>
-        <SessionContext.Provider value={sessionValue}>
-          <SeedsContext.Provider value={seedsValue}>
-            <WebsocketContext.Provider value={websocketValue}>
-              <InputContext.Provider value={inputValue}>
-                <FramesContext.Provider value={framesValue}>
-                  <SurfaceContext.Provider value={surfaceValue}>{children}</SurfaceContext.Provider>
-                </FramesContext.Provider>
-              </InputContext.Provider>
-            </WebsocketContext.Provider>
-          </SeedsContext.Provider>
-        </SessionContext.Provider>
-      </EngineContext.Provider>
-    </ConnectionContext.Provider>
+    <StreamingProviders
+      values={{
+        connection: connectionValue,
+        engine: engineValue,
+        session: sessionValue,
+        frames: framesValue,
+        input: inputValue,
+        seeds: seedsValue,
+        websocket: websocketValue,
+        surface: surfaceValue
+      }}
+    >
+      {children}
+    </StreamingProviders>
   )
 }
