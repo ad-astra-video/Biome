@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react'
+import { useEffect, useMemo, useReducer, useState } from 'react'
 import {
   initialSceneEditState,
   sceneEditReducer,
@@ -43,5 +43,5 @@ export function useSceneEdit(): {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isActive])
 
-  return { state, dispatch, isActive, graceActive }
+  return useMemo(() => ({ state, dispatch, isActive, graceActive }), [state, dispatch, isActive, graceActive])
 }
