@@ -17,12 +17,12 @@ import useWebSocket, {
 } from '../hooks/useWebSocket'
 import useGameInput from '../hooks/useGameInput'
 import { useSettings } from '../hooks/settingsContextValue'
-import { ENGINE_MODES, DEFAULT_WORLD_ENGINE_MODEL, type Settings } from '../types/settings'
-import type { SessionConfig } from '../types/protocol.generated'
+import { ENGINE_MODES, DEFAULT_WORLD_ENGINE_MODEL } from '../types/settings'
 import useEngineApi from '../hooks/useEngineApi'
 import useSeedsDir from '../hooks/useSeedsDir'
 import { invoke } from '../bridge'
 import { createLogger } from '../utils/logger'
+import { buildSessionConfig } from './streaming/sessionConfig'
 import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
 import { EngineContext, type EngineContextValue } from './streaming/engine'
 import { SessionContext, type SessionContextValue } from './streaming/session'
@@ -37,28 +37,6 @@ const log = createLogger('Streaming')
 
 // Browsers require ~1s delay before pointer lock can be re-requested
 const UNLOCK_DELAY_MS = 1250
-
-/** Build the wire-canonical `SessionConfig` from current settings. Sent
- *  in every InitRequest — the server diffs each field against current
- *  state and reconfigures the deltas. The renderer's `'none'` quant
- *  sentinel maps to `undefined` (omitted on the wire); the server reads
- *  that as no-quantization. Recording is gated to standalone mode,
- *  matching what the server expects to receive. */
-const buildSessionConfig = async (settings: Settings, isStandaloneMode: boolean): Promise<SessionConfig> => {
-  const recordingEnabled = isStandaloneMode && (settings.recording?.enabled ?? false)
-  const videoOutputDir = recordingEnabled
-    ? ((await invoke('resolve-video-dir', settings.recording?.output_dir ?? '')) ?? null)
-    : null
-  const quant = settings.engine_quant ?? 'none'
-  return {
-    quant: quant !== 'none' ? quant : undefined,
-    scene_authoring: settings.scene_authoring_enabled ?? false,
-    action_logging: settings.debug_overlays?.action_logging ?? false,
-    video_recording: recordingEnabled,
-    video_output_dir: videoOutputDir,
-    cap_inference_fps: settings.cap_inference_fps ?? true
-  }
-}
 
 export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const { state, states, transitionTo } = usePortal()
