@@ -123,7 +123,6 @@ type WebSocketHook = {
   frame: Blob | string | null
   hasRealFrame: boolean
   frameId: number
-  genTime: number | null
   latentGenMs: number | null
   temporalCompression: number
   frameGenMsRef: { current: number }
@@ -151,7 +150,6 @@ export const useWebSocket = (): WebSocketHook => {
   const [status, setStatus] = useState<ConnectionStatus>({ kind: 'idle' })
   const [frame, setFrame] = useState<Blob | string | null>(null)
   const [frameId, setFrameId] = useState(0)
-  const [genTime, setGenTime] = useState<number | null>(null)
   const [latentGenMs, setLatentGenMs] = useState<number | null>(null)
   const [statusStage, setStatusStage] = useState<StageId | null>(null)
   const [hasRealFrame, setHasRealFrame] = useState(false)
@@ -282,7 +280,6 @@ export const useWebSocket = (): WebSocketHook => {
           frameTemporalCompressionRef.current = headerTemporalCompression
           setTemporalCompression(headerTemporalCompression)
           frameGenMsRef.current = header.gen_ms
-          setGenTime(Math.round(header.gen_ms))
           frameIdRef.current = header.frame_id
           // First display frame of each latent pass: update latent gen stats and GPU metrics
           if ((frameIdRef.current - 1) % headerTemporalCompression === 0) {
@@ -398,7 +395,6 @@ export const useWebSocket = (): WebSocketHook => {
         setFrame(null)
         setHasRealFrame(false)
         setFrameId(0)
-        setGenTime(null)
         setLatentGenMs(null)
         // Preserve systemInfo + lastErrorSnapshot across close so a bug report
         // copied after the server dies still has the hardware identity + the
@@ -426,7 +422,6 @@ export const useWebSocket = (): WebSocketHook => {
     setStatus({ kind: 'idle' })
     setFrame(null)
     setFrameId(0)
-    setGenTime(null)
     // Explicit user-initiated disconnect — clear everything including any
     // previously cached systemInfo, since this isn't a "server died" case.
     setServer(emptyConnection())
@@ -505,7 +500,6 @@ export const useWebSocket = (): WebSocketHook => {
     frame,
     hasRealFrame,
     frameId,
-    genTime,
     latentGenMs,
     temporalCompression,
     frameGenMsRef,

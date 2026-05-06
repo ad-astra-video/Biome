@@ -60,7 +60,8 @@ const computeFrametimeStats = (entries: { time: number; value: number }[]): Fram
 }
 
 const PerformanceStatsOverlay = () => {
-  const { isStreaming, server, inputLatency, latentGenMs, temporalCompression, frameId } = useStreaming()
+  const { isStreaming, server, frames } = useStreaming()
+  const { inputLatency, latentGenMs, temporalCompression, id: frameId } = frames
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.performance_stats
   const quant = settings.engine_quant ?? 'none'

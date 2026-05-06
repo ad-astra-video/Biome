@@ -7,11 +7,6 @@ import type { InputCode } from '../types/input'
 import type { WsRequest } from '../lib/wsRpc'
 import type { SceneEditState, SceneEditEvent } from './sceneEditMachine'
 
-export type StreamingStats = {
-  gentime: number
-  rtt: number
-}
-
 export type StreamingContextValue = {
   connectionStatus: ConnectionStatus
   /** Canonical user-visible error for the engine session: the sticky
@@ -37,17 +32,16 @@ export type StreamingContextValue = {
   statusStage: StageId | null
   isFreshInstall: boolean
 
-  genTime: number | null
-  latentGenMs: number | null
-  temporalCompression: number
-  frameId: number
-  fps: number
-  showStats: boolean
-  setShowStats: (value: boolean) => void
-  stats: StreamingStats
+  /** Live frame-stream metrics. Refs are mutable cells consumed by the
+   *  canvas-render loop and the timeline overlay. */
+  frames: {
+    id: number
+    latentGenMs: number | null
+    temporalCompression: number
+    inputLatency: number | null
+    timelineRef: { current: { currentIndex: number; slotDisplayAts: (number | null)[] } }
+  }
   server: ServerConnection
-  inputLatency: number | null
-  frameTimelineRef: { current: { currentIndex: number; slotDisplayAts: (number | null)[] } }
 
   endpointUrl: string | null
   setEndpointUrl: (url: string | null) => void

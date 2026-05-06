@@ -86,7 +86,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     statusStage,
     frame,
     frameId,
-    genTime,
     latentGenMs,
     temporalCompression,
     frameGenMsRef,
@@ -119,10 +118,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const [sceneEditState, dispatchSceneEdit] = useReducer(sceneEditReducer, initialSceneEditState)
   const sceneEditActive = sceneEditState.phase !== 'inactive'
   const [sceneEditGrace, setSceneEditGrace] = useState(false)
-  const [showStats, setShowStats] = useState(false)
   const mouseSensitivity = settings.mouse_sensitivity
   const gamepadSensitivity = settings.gamepad_sensitivity
-  const [fps, setFps] = useState(0)
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
   const [endpointUrl, setEndpointUrl] = useState<string | null>(null)
@@ -138,8 +135,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
 
   const prevEngineModeRef = useRef(engineMode)
   const prevOfflineModeRef = useRef(settings.offline_mode ?? false)
-  const frameCountRef = useRef(0)
-  const lastFpsUpdateRef = useRef(performance.now())
   const inputLoopRef = useRef<number | null>(null)
   const lastAppliedModelRef = useRef<string | null>(null)
   const lastSeedRef = useRef<{ filename: string; imageData: string } | null>(null)
@@ -579,12 +574,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       if (item && now >= item.displayAt) {
         bitmapQueueRef.current.shift()
         frameTimelineRef.current.currentIndex = item.frameId % frameTemporalCompressionRef.current
-        frameCountRef.current++
-        if (now - lastFpsUpdateRef.current >= 1000) {
-          setFps(frameCountRef.current)
-          frameCountRef.current = 0
-          lastFpsUpdateRef.current = now
-        }
         ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(item.bitmap, 0, 0, canvas.width, canvas.height)
         item.bitmap.close()
@@ -793,21 +782,15 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     statusStage: effectiveStatusStage,
     isFreshInstall,
 
-    // Stats
-    genTime,
-    latentGenMs,
-    temporalCompression,
-    frameId,
-    fps,
-    stats: {
-      gentime: genTime ?? 0,
-      rtt: 0
+    // Frame stream
+    frames: {
+      id: frameId,
+      latentGenMs,
+      temporalCompression,
+      inputLatency,
+      timelineRef: frameTimelineRef
     },
-    showStats,
-    setShowStats,
     server,
-    inputLatency,
-    frameTimelineRef,
 
     endpointUrl,
     setEndpointUrl,
