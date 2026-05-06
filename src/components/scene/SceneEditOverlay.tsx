@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useInput } from '../context/streaming/input'
-import { useSession } from '../context/streaming/session'
-import { useWebsocket } from '../context/streaming/websocket'
-import { SETTINGS_CONTROL_BASE, SETTINGS_CONTROL_TEXT } from '../styles'
-import type { SceneEditPhase } from '../context/streaming/sceneEditMachine'
-import { RpcError } from '../lib/wsRpc'
+import { useInput } from '../../context/streaming/input'
+import { useSession } from '../../context/streaming/session'
+import { useWebsocket } from '../../context/streaming/websocket'
+import { SETTINGS_CONTROL_BASE, SETTINGS_CONTROL_TEXT } from '../../styles'
+import type { SceneEditPhase } from '../../context/streaming/sceneEditMachine'
+import { RpcError } from '../../lib/wsRpc'
 
 const SceneEditOverlay = () => {
   const { t } = useTranslation()

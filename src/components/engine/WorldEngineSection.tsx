@@ -1,5 +1,5 @@
-import SettingsSection from './ui/SettingsSection'
-import SettingsButton from './ui/SettingsButton'
+import SettingsSection from '../ui/SettingsSection'
+import SettingsButton from '../ui/SettingsButton'
 import { useTranslation } from 'react-i18next'
 
 type WorldEngineSectionProps = {

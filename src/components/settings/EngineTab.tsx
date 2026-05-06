@@ -13,8 +13,8 @@ import SettingsTextInput from '../ui/SettingsTextInput'
 import SettingsCheckbox from '../ui/SettingsCheckbox'
 import SettingsRow from '../ui/SettingsRow'
 import ConfirmModal from '../ui/ConfirmModal'
-import WorldEngineSection from '../WorldEngineSection'
-import EngineInstallModal from '../EngineInstallModal'
+import WorldEngineSection from '../engine/WorldEngineSection'
+import EngineInstallModal from '../engine/EngineInstallModal'
 
 type MenuModelOption = {
   id: string

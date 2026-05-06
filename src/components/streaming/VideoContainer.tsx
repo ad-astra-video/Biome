@@ -1,8 +1,8 @@
 import { useRef, useEffect, useCallback } from 'react'
-import { useConnection } from '../context/streaming/connection'
-import { useInput } from '../context/streaming/input'
-import { useSession } from '../context/streaming/session'
-import { useStreamingSurface } from '../context/streaming/surface'
+import { useConnection } from '../../context/streaming/connection'
+import { useInput } from '../../context/streaming/input'
+import { useSession } from '../../context/streaming/session'
+import { useStreamingSurface } from '../../context/streaming/surface'
 
 const VideoContainer = () => {
   const { isStreaming } = useConnection()

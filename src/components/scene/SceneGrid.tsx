@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import type { SeedRecord } from '../types/app'
-import type { NavDirection } from '../lib/focusNavigation'
+import type { SeedRecord } from '../../types/app'
+import type { NavDirection } from '../../lib/focusNavigation'
 import SceneCard from './SceneCard'
 
 // Track the hovered card + which half the cursor is on. This preserves the

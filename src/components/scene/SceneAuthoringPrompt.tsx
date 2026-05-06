@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { SETTINGS_CONTROL_BASE, SETTINGS_CONTROL_TEXT } from '../styles'
+import { SETTINGS_CONTROL_BASE, SETTINGS_CONTROL_TEXT } from '../../styles'
 
 interface SceneAuthoringPromptProps {
   isGenerating: boolean

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useConnection } from '../context/streaming/connection'
-import { useFrames } from '../context/streaming/frames'
-import { useSettings } from '../hooks/settings/settingsContextValue'
-import Sparkline from './Sparkline'
+import { useConnection } from '../../context/streaming/connection'
+import { useFrames } from '../../context/streaming/frames'
+import { useSettings } from '../../hooks/settings/settingsContextValue'
+import Sparkline from '../ui/Sparkline'
 
 const BUFFER_SIZE = 60
 const FT_WINDOW_MS = 1000

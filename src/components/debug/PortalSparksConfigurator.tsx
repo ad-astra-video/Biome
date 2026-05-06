@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react'
-import { SPARK_TUNING, SPARK_TUNING_DEFAULTS } from '../lib/portalSparksTuning'
-import type { PortalSparksTuning } from '../lib/portalSparksTuning'
-import { SPARK_DEBUG } from '../lib/sparkDebug'
-import { invoke } from '../bridge'
+import { SPARK_TUNING, SPARK_TUNING_DEFAULTS } from '../../lib/portalSparksTuning'
+import type { PortalSparksTuning } from '../../lib/portalSparksTuning'
+import { SPARK_DEBUG } from '../../lib/sparkDebug'
+import { invoke } from '../../bridge'
 
 type TuningKey = keyof PortalSparksTuning
 

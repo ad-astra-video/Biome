@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import { PortalSparksRenderer } from '../lib/portalSparksRenderer'
+import { PortalSparksRenderer } from '../../lib/portalSparksRenderer'
 
 type PortalSparksProps = {
   glowRgb: [number, number, number]

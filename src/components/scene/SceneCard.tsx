@@ -1,8 +1,8 @@
 import type { DragEvent } from 'react'
-import type { SeedRecord } from '../types/app'
-import { useUISound } from '../hooks/audio/useUISound'
-import { useAudio } from '../context/audio/audioContextValue'
-import { useInputModality } from '../lib/inputModality'
+import type { SeedRecord } from '../../types/app'
+import { useUISound } from '../../hooks/audio/useUISound'
+import { useAudio } from '../../context/audio/audioContextValue'
+import { useInputModality } from '../../lib/inputModality'
 import { useTranslation } from 'react-i18next'
 import SceneCardBase from './SceneCardBase'
 

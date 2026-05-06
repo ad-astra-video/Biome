@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { TranslatableError, type TranslationKey } from '../i18n'
-import type { DiagnosticsPayload, LogRecord } from '../types/ipc'
-import Button from './ui/Button'
-import { findFocusables, findInDirection, focusSmooth } from '../lib/focusNavigation'
-import { getActiveScopeRoot } from '../context/focus/focusScopeStack'
+import { TranslatableError, type TranslationKey } from '../../i18n'
+import type { DiagnosticsPayload, LogRecord } from '../../types/ipc'
+import Button from '../ui/Button'
+import { findFocusables, findInDirection, focusSmooth } from '../../lib/focusNavigation'
+import { getActiveScopeRoot } from '../../context/focus/focusScopeStack'
 
 const MAX_ERROR_MESSAGE_CHARS = 220
 const MAX_GITHUB_BODY_CHARS = 1200
