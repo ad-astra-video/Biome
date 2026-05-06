@@ -84,17 +84,13 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     request: wsRequest,
     clearLogs: clearWsLogs
   } = useWebSocket()
-  const isConnected = wsIsConnected(connectionStatus)
   const isReady = wsIsReady(connectionStatus)
-  const transportError = wsConnectionError(connectionStatus)
   const { getSeedsDirPath, openSeedsDir, seedsDir } = useSeedsDir()
 
   const { state: pauseState, pause: pauseSession, resume: resumeSession } = usePauseState()
   const isPaused = pauseState.kind === 'paused'
   const [settingsOpen, setSettingsOpen] = useState(false)
   const sceneEdit = useSceneEdit()
-  const mouseSensitivity = settings.mouse_sensitivity
-  const gamepadSensitivity = settings.gamepad_sensitivity
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
 
@@ -162,7 +158,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const { selectSeed, lastAppliedModel, resetSession } = useSessionInit({
     portalState: state,
     loadingState: states.LOADING,
-    isConnected,
+    isConnected: wsIsConnected(connectionStatus),
     isStreaming,
     isStandaloneMode,
     settings,
@@ -191,8 +187,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     enabled: inputEnabled,
     containerRef,
     keybindings: settings.keybindings,
-    mouseSensitivity,
-    gamepadSensitivity,
+    mouseSensitivity: settings.mouse_sensitivity,
+    gamepadSensitivity: settings.gamepad_sensitivity,
     sendControl,
     onReset: handleReset,
     onSceneEdit: settings.scene_authoring_enabled ? handleSceneEdit : null,
@@ -280,7 +276,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       setConnectionLost
     })
 
-  const error = engineError ?? transportError
+  const error = engineError ?? wsConnectionError(connectionStatus)
 
   const connectionValue = useMemo<ConnectionContextValue>(
     () => ({
