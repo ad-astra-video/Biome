@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import type { TranslationKey } from '../i18n'
 import { VIEW_DESCRIPTION, VIEW_HEADING } from '../styles'
 import { useSettings } from '../hooks/settingsContextValue'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
 import { ENGINE_MODES } from '../types/settings'
 import { useVolumeControls } from '../hooks/useVolumeControls'
 import MenuButton from './ui/MenuButton'
@@ -38,7 +38,7 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
   const { t } = useTranslation()
   const { settings, saveSettings } = useSettings()
   const gamepadConnected = useGamepadConnected()
-  const { isStreaming } = useStreaming()
+  const { isStreaming } = useConnection()
   const volume = useVolumeControls()
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general')

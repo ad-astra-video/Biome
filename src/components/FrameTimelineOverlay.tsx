@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useFrames } from '../context/streaming/frames'
 import { useSettings } from '../hooks/settingsContextValue'
 
 const OVERLAY_BG = 'bg-black/50'
@@ -20,7 +21,8 @@ type FrameSlot = {
 }
 
 const FrameTimelineOverlay = () => {
-  const { isStreaming, frames } = useStreaming()
+  const { isStreaming } = useConnection()
+  const frames = useFrames()
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.frame_timeline
   const [slots, setSlots] = useState<FrameSlot[]>([])

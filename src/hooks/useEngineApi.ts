@@ -26,7 +26,7 @@ export type UseEngineResult = {
   serverLogPath: string | null
 }
 
-export const useEngine = (): UseEngineResult => {
+export const useEngineApi = (): UseEngineResult => {
   const [status, setStatus] = useState<EngineStatus | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -44,7 +44,7 @@ export const useEngine = (): UseEngineResult => {
   const checkStatus = useCallback(async () => {
     try {
       setError(null)
-      const engineStatus = await invoke('check-engine-status', 'useEngine.checkStatus')
+      const engineStatus = await invoke('check-engine-status', 'useEngineApi.checkStatus')
       setStatus(engineStatus)
       return engineStatus
     } catch (err) {
@@ -65,7 +65,7 @@ export const useEngine = (): UseEngineResult => {
 
         setSetupProgress('Verifying setup...')
         onStage?.('setup.verify')
-        const finalStatus = await invoke('check-engine-status', 'useEngine.runEngineInstall.post')
+        const finalStatus = await invoke('check-engine-status', 'useEngineApi.runEngineInstall.post')
         setStatus(finalStatus)
 
         setSetupProgress(null)
@@ -109,7 +109,7 @@ export const useEngine = (): UseEngineResult => {
       setServerStarting(true)
       setError(null)
       const result = await invoke('start-engine-server', port)
-      const newStatus = await invoke('check-engine-status', 'useEngine.startServer.post')
+      const newStatus = await invoke('check-engine-status', 'useEngineApi.startServer.post')
       setStatus(newStatus)
       return result
     } catch (err) {
@@ -124,7 +124,7 @@ export const useEngine = (): UseEngineResult => {
     try {
       setError(null)
       const result = await invoke('stop-engine-server')
-      const newStatus = await invoke('check-engine-status', 'useEngine.stopServer.post')
+      const newStatus = await invoke('check-engine-status', 'useEngineApi.stopServer.post')
       setStatus(newStatus)
       return result
     } catch (err) {
@@ -138,7 +138,7 @@ export const useEngine = (): UseEngineResult => {
       const running = await invoke('is-server-running')
       if (lastRunningRef.current !== running) {
         lastRunningRef.current = running
-        const newStatus = await invoke('check-engine-status', 'useEngine.checkServerRunning.delta')
+        const newStatus = await invoke('check-engine-status', 'useEngineApi.checkServerRunning.delta')
         setStatus(newStatus)
       }
       return running
@@ -203,4 +203,4 @@ export const useEngine = (): UseEngineResult => {
   }
 }
 
-export default useEngine
+export default useEngineApi

@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStreaming } from '../context/streamingContextValue'
+import { useInput } from '../context/streaming/input'
+import { useSession } from '../context/streaming/session'
+import { useWebsocket } from '../context/streaming/websocket'
 import { SETTINGS_CONTROL_BASE, SETTINGS_CONTROL_TEXT } from '../styles'
 import type { SceneEditPhase } from '../context/sceneEditMachine'
 import { RpcError } from '../lib/wsRpc'
 
 const SceneEditOverlay = () => {
   const { t } = useTranslation()
-  const { session, websocket, input } = useStreaming()
-  const requestPointerLock = input.pointerLock.request
-  const { state: sceneEditState, dispatch: dispatchSceneEdit } = session.sceneEdit
+  const requestPointerLock = useInput().pointerLock.request
+  const websocket = useWebsocket()
+  const { state: sceneEditState, dispatch: dispatchSceneEdit } = useSession().sceneEdit
   const { phase, errorMessage } = sceneEditState
   const isActive = phase !== 'inactive'
 

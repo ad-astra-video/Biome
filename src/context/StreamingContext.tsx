@@ -19,12 +19,18 @@ import useGameInput from '../hooks/useGameInput'
 import { useSettings } from '../hooks/settingsContextValue'
 import { ENGINE_MODES, DEFAULT_WORLD_ENGINE_MODEL, type Settings } from '../types/settings'
 import type { SessionConfig } from '../types/protocol.generated'
-import useEngine from '../hooks/useEngine'
-import useSeeds from '../hooks/useSeeds'
+import useEngineApi from '../hooks/useEngineApi'
+import useSeedsDir from '../hooks/useSeedsDir'
 import { invoke } from '../bridge'
 import { createLogger } from '../utils/logger'
-import type { StreamingContextValue } from './streamingContextTypes'
-import { StreamingContext } from './streamingContextValue'
+import { ConnectionContext, type ConnectionContextValue } from './streaming/connection'
+import { EngineContext, type EngineContextValue } from './streaming/engine'
+import { SessionContext, type SessionContextValue } from './streaming/session'
+import { FramesContext, type FramesContextValue } from './streaming/frames'
+import { InputContext, type InputContextValue } from './streaming/input'
+import { SeedsContext, type SeedsContextValue } from './streaming/seeds'
+import { WebsocketContext, type WebsocketContextValue } from './streaming/websocket'
+import { SurfaceContext, type SurfaceContextValue } from './streaming/surface'
 import { initialSceneEditState, sceneEditReducer } from './sceneEditMachine'
 
 const log = createLogger('Streaming')
@@ -80,7 +86,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     setupProgress,
     isLoading: engineSetupInProgress,
     error: engineSetupError
-  } = useEngine()
+  } = useEngineApi()
   const {
     status: connectionStatus,
     statusStage,
@@ -109,7 +115,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const isConnected = wsIsConnected(connectionStatus)
   const isReady = wsIsReady(connectionStatus)
   const transportError = wsConnectionError(connectionStatus)
-  const { getSeedsDirPath, openSeedsDir, seedsDir } = useSeeds()
+  const { getSeedsDirPath, openSeedsDir, seedsDir } = useSeedsDir()
 
   const [isPaused, setIsPaused] = useState(false)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
@@ -754,41 +760,68 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     [sendInit, applyInitResponse, isStandaloneMode]
   )
 
-  const value: StreamingContextValue = {
-    // Connection state
-    connectionStatus,
-    error: engineError ?? transportError,
-    connectionLost,
-    isVideoReady: hasReceivedFrame && canvasReady,
-    isStreaming,
-    isUIActive: !inputEnabled,
-    session: {
+  const error = engineError ?? transportError
+
+  const connectionValue = useMemo<ConnectionContextValue>(
+    () => ({
+      status: connectionStatus,
+      error,
+      connectionLost,
+      statusStage: effectiveStatusStage,
+      isStreaming,
+      isVideoReady: hasReceivedFrame && canvasReady,
+      isUIActive: !inputEnabled,
+      isFreshInstall,
+      server,
+      dismissConnectionLost,
+      reconnectAfterConnectionLost,
+      cancelConnection,
+      prepareReturnToMainMenu
+    }),
+    [
+      connectionStatus,
+      error,
+      connectionLost,
+      effectiveStatusStage,
+      isStreaming,
+      hasReceivedFrame,
+      canvasReady,
+      inputEnabled,
+      isFreshInstall,
+      server,
+      dismissConnectionLost,
+      reconnectAfterConnectionLost,
+      cancelConnection,
+      prepareReturnToMainMenu
+    ]
+  )
+
+  const sessionValue = useMemo<SessionContextValue>(
+    () => ({
       isPaused,
       pausedAt,
       pauseElapsedMs,
       canUnpause,
       unlockDelayMs: UNLOCK_DELAY_MS,
       settingsOpen,
-      sceneEdit: {
-        state: sceneEditState,
-        dispatch: dispatchSceneEdit
-      }
-    },
-    statusStage: effectiveStatusStage,
-    isFreshInstall,
+      sceneEdit: { state: sceneEditState, dispatch: dispatchSceneEdit }
+    }),
+    [isPaused, pausedAt, pauseElapsedMs, canUnpause, settingsOpen, sceneEditState, dispatchSceneEdit]
+  )
 
-    // Frame stream
-    frames: {
+  const framesValue = useMemo<FramesContextValue>(
+    () => ({
       id: frameId,
       latentGenMs,
       temporalCompression,
       inputLatency,
       timelineRef: frameTimelineRef
-    },
-    server,
+    }),
+    [frameId, latentGenMs, temporalCompression, inputLatency, frameTimelineRef]
+  )
 
-    // Standalone engine state + actions
-    engine: {
+  const engineValue = useMemo<EngineContextValue>(
+    () => ({
       status: engineStatus,
       isReady: engineReady,
       isRunning: isServerRunning,
@@ -802,24 +835,43 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
         nukeAndReinstall: nukeAndReinstallEngine,
         abort: abortEngineInstall
       }
-    },
+    }),
+    [
+      engineStatus,
+      engineReady,
+      isServerRunning,
+      serverLogPath,
+      checkEngineStatus,
+      engineSetupInProgress,
+      setupProgress,
+      engineSetupError,
+      setupEngine,
+      nukeAndReinstallEngine,
+      abortEngineInstall
+    ]
+  )
 
-    // Seeds
-    seeds: {
+  const seedsValue = useMemo<SeedsContextValue>(
+    () => ({
       dir: seedsDir,
       openDir: openSeedsDir,
       select: selectSeed
-    },
+    }),
+    [seedsDir, openSeedsDir, selectSeed]
+  )
 
-    websocket: {
+  const websocketValue = useMemo<WebsocketContextValue>(
+    () => ({
       request: wsRequest,
       logs: wsLogs,
       allLogs: wsAllLogs,
       clearLogs: clearWsLogs
-    },
+    }),
+    [wsRequest, wsLogs, wsAllLogs, clearWsLogs]
+  )
 
-    // Input state
-    input: {
+  const inputValue = useMemo<InputContextValue>(
+    () => ({
       pressedKeys,
       mouseButtons,
       pressedGamepad,
@@ -830,19 +882,47 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
         request: requestPointerLock,
         exit: exitPointerLock
       }
-    },
+    }),
+    [
+      pressedKeys,
+      mouseButtons,
+      pressedGamepad,
+      scrollActive,
+      isPointerLocked,
+      pointerLockBlockedSeq,
+      requestPointerLock,
+      exitPointerLock
+    ]
+  )
 
-    // Lifecycle actions
-    dismissConnectionLost,
-    reconnectAfterConnectionLost,
-    cancelConnection,
-    prepareReturnToMainMenu,
+  const surfaceValue = useMemo<SurfaceContextValue>(
+    () => ({
+      registerContainer: registerContainerRef,
+      registerCanvas: registerCanvasRef,
+      handleContainerClick
+    }),
+    [registerContainerRef, registerCanvasRef, handleContainerClick]
+  )
 
-    // DOM refs
-    registerContainerRef,
-    registerCanvasRef,
-    handleContainerClick
-  }
-
-  return <StreamingContext.Provider value={value}>{children}</StreamingContext.Provider>
+  // The provider stack has no functional ordering — the order below is
+  // chosen so each context's intended audience reads naturally
+  // (connection at the outside, surface at the inside next to its
+  // VideoContainer consumer).
+  return (
+    <ConnectionContext.Provider value={connectionValue}>
+      <EngineContext.Provider value={engineValue}>
+        <SessionContext.Provider value={sessionValue}>
+          <SeedsContext.Provider value={seedsValue}>
+            <WebsocketContext.Provider value={websocketValue}>
+              <InputContext.Provider value={inputValue}>
+                <FramesContext.Provider value={framesValue}>
+                  <SurfaceContext.Provider value={surfaceValue}>{children}</SurfaceContext.Provider>
+                </FramesContext.Provider>
+              </InputContext.Provider>
+            </WebsocketContext.Provider>
+          </SeedsContext.Provider>
+        </SessionContext.Provider>
+      </EngineContext.Provider>
+    </ConnectionContext.Provider>
+  )
 }

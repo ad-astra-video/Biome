@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useAudio } from '../context/audioContextValue'
 import { usePortal } from '../context/portalContextValue'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useSession } from '../context/streaming/session'
 
 /** Duration in seconds for music crossfades. */
 const MUSIC_FADE_S = 0.5
@@ -13,7 +14,8 @@ const MUSIC_FADE_S = 0.5
 const AudioController = () => {
   const { play, fadeOutLoop, crossfadeLoop, stopAllLoops } = useAudio()
   const { state, states } = usePortal()
-  const { error, session } = useStreaming()
+  const { error } = useConnection()
+  const session = useSession()
   const prevHasErrorRef = useRef(false)
   // Manage ambient loops based on portal state
   useEffect(() => {

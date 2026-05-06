@@ -4,7 +4,7 @@ import { invoke } from '../../bridge'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { ENGINE_MODES, QUANT_OPTIONS, type QuantOption, type Settings } from '../../types/settings'
 import { useSettings } from '../../hooks/settingsContextValue'
-import { useStreaming } from '../../context/streamingContextValue'
+import { useEngine } from '../../context/streaming/engine'
 import { normalizeServerUrl, toHealthUrl } from '../../utils/serverUrl'
 import SettingsSection from '../ui/SettingsSection'
 import SettingsToggle from '../ui/SettingsToggle'
@@ -55,7 +55,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const { settings, active, menuEngineMode, setMenuEngineMode } = props
   const { t } = useTranslation()
   const { saveSettings } = useSettings()
-  const { engine } = useStreaming()
+  const engine = useEngine()
 
   const configEngineMode = settings.engine_mode
   const configWorldModel = settings.engine_model

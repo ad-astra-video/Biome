@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useInput } from '../context/streaming/input'
 import { useSettings } from '../hooks/settingsContextValue'
 import type { InputCode } from '../types/input'
 import { CODE_MAP } from '../hooks/useGameInput'
@@ -271,7 +272,8 @@ const computeSimulatedKBM = (pressedGamepad: Set<InputCode>): Set<InputCode> => 
 }
 
 const InputOverlay = () => {
-  const { isStreaming, input } = useStreaming()
+  const { isStreaming } = useConnection()
+  const input = useInput()
   const { pressedKeys, mouseButtons, pressedGamepad, scrollActive } = input
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.input

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '../bridge'
 import { RpcError } from '../lib/wsRpc'
 import { useSettings } from './settingsContextValue'
-import { useStreaming } from '../context/streamingContextValue'
+import { useWebsocket } from '../context/streaming/websocket'
 
 type GenerateState = 'idle' | 'loading' | 'error'
 
@@ -21,7 +21,7 @@ type UseSceneGenerationOptions = {
 
 export function useSceneGeneration({ refreshSeeds, isActive, setLastAddedFilename }: UseSceneGenerationOptions) {
   const { t } = useTranslation()
-  const { websocket } = useStreaming()
+  const websocket = useWebsocket()
   const { settings } = useSettings()
   const [generateState, setGenerateState] = useState<GenerateState>('idle')
   const [generateError, setGenerateError] = useState<string | null>(null)

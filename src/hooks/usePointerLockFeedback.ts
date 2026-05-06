@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAudio } from '../context/audioContextValue'
-import { useStreaming } from '../context/streamingContextValue'
+import { useInput } from '../context/streaming/input'
+import { useSession } from '../context/streaming/session'
 
 /**
  * Centralizes pointer-lock cooldown feedback: plays an error sound and
@@ -9,9 +10,8 @@ import { useStreaming } from '../context/streamingContextValue'
  */
 export function usePointerLockFeedback(isActive: boolean) {
   const { play } = useAudio()
-  const { session, input } = useStreaming()
-  const { canUnpause, unlockDelayMs, pauseElapsedMs } = session
-  const pointerLockBlockedSeq = input.pointerLock.blockedSeq
+  const { canUnpause, unlockDelayMs, pauseElapsedMs } = useSession()
+  const pointerLockBlockedSeq = useInput().pointerLock.blockedSeq
   const [showUnlockHint, setShowUnlockHint] = useState(false)
   const lastBlockedSeqRef = useRef(pointerLockBlockedSeq)
 

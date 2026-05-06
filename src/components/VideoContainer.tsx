@@ -1,22 +1,28 @@
 import { useRef, useEffect, useCallback } from 'react'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useInput } from '../context/streaming/input'
+import { useSession } from '../context/streaming/session'
+import { useStreamingSurface } from '../context/streaming/surface'
 
 const VideoContainer = () => {
-  const { isStreaming, session, registerContainerRef, registerCanvasRef, handleContainerClick, input } = useStreaming()
+  const { isStreaming } = useConnection()
+  const session = useSession()
+  const input = useInput()
+  const { registerContainer, registerCanvas, handleContainerClick } = useStreamingSurface()
 
   const containerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (containerRef.current) {
-      registerContainerRef(containerRef.current)
+      registerContainer(containerRef.current)
     }
-  }, [registerContainerRef])
+  }, [registerContainer])
 
   const handleCanvasRef = useCallback(
     (element: HTMLCanvasElement | null) => {
-      registerCanvasRef(element)
+      registerCanvas(element)
     },
-    [registerCanvasRef]
+    [registerCanvas]
   )
 
   const cursorClass = input.pointerLock.isLocked

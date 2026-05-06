@@ -3,7 +3,8 @@ import { invoke } from '../bridge'
 import type { TranslationKey } from '../i18n'
 import { buildDiagnosticsPayload } from '../lib/diagnosticsPayload'
 import { resolveStage } from '../stages'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useWebsocket } from '../context/streaming/websocket'
 import { useVortex } from '../context/vortexContextValue'
 import { useSettings } from '../hooks/settingsContextValue'
 import { useEngineLogs } from '../hooks/useEngineLogs'
@@ -25,7 +26,8 @@ type TerminalDisplayProps = {
 
 const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   const { t } = useTranslation()
-  const { connectionStatus, statusStage, isFreshInstall, error, cancelConnection, websocket, server } = useStreaming()
+  const { status: connectionStatus, statusStage, isFreshInstall, error, cancelConnection, server } = useConnection()
+  const websocket = useWebsocket()
   const { setErrorMode } = useVortex()
   const { isServerMode, settings } = useSettings()
   const { logs: engineLogs } = useEngineLogs(!isServerMode)

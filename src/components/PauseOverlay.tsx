@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useStreaming } from '../context/streamingContextValue'
+import { useInput } from '../context/streaming/input'
+import { useSeeds } from '../context/streaming/seeds'
+import { useSession } from '../context/streaming/session'
+import { useWebsocket } from '../context/streaming/websocket'
 import MenuSettingsView from './MenuSettingsView'
 import PauseMainView from './PauseMainView'
 import { PAUSE_VIEW, type PauseViewKey } from '../constants'
@@ -15,8 +18,9 @@ import { useSettings } from '../hooks/settingsContextValue'
 import { FocusScope } from '../context/FocusScopeContext'
 
 const PauseOverlayContent = () => {
-  const streaming = useStreaming()
-  const requestPointerLock = streaming.input.pointerLock.request
+  const requestPointerLock = useInput().pointerLock.request
+  const selectSeed = useSeeds().select
+  const websocket = useWebsocket()
   const { settings } = useSettings()
   const pauseMenuCode = settings.keybindings.pauseMenu
   const [view, setView] = useState<PauseViewKey>(PAUSE_VIEW.MAIN)
@@ -37,7 +41,7 @@ const PauseOverlayContent = () => {
     handleImageDrop,
     handleClipboardUpload
   } = useSeedManager({
-    wsRequest: streaming.websocket.request,
+    wsRequest: websocket.request,
     isActive: true,
     onPinnedSceneRemoved: (filename: string) => removeScene(filename),
     // Upload / drop / paste: set the CTA first so it's visible even if things
@@ -49,7 +53,7 @@ const PauseOverlayContent = () => {
       const last = filenames[filenames.length - 1]
       setLastAddedFilename(last)
       if (filenames.length === 1) {
-        void streaming.seeds.select(last).then(() => requestPointerLock())
+        void selectSeed(last).then(() => requestPointerLock())
       }
     }
   })
@@ -145,7 +149,7 @@ const PauseOverlayContent = () => {
  *  AnimatePresence so App.tsx just drops `<PauseOverlay />` in and the overlay
  *  never lingers in the DOM while inactive. */
 const PauseOverlay = () => {
-  const { session } = useStreaming()
+  const session = useSession()
   const visible = session.isPaused && session.sceneEdit.state.phase === 'inactive'
 
   return (

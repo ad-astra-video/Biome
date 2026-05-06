@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from 'react'
-import { useStreaming } from '../context/streamingContextValue'
+import { useInput } from '../context/streaming/input'
+import { useSeeds } from '../context/streaming/seeds'
 import { ALLOW_USER_SCENES } from '../constants'
 
 /**
@@ -11,7 +12,8 @@ import { ALLOW_USER_SCENES } from '../constants'
  *   and {@link ALLOW_USER_SCENES} is on.
  */
 export function useSceneActions(handleClipboardUpload: () => Promise<string[]>, pasteEnabled = true) {
-  const { seeds, input } = useStreaming()
+  const seeds = useSeeds()
+  const input = useInput()
 
   const selectScene = useCallback(
     async (filename: string) => {

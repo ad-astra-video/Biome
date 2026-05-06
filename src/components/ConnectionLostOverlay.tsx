@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { buildDiagnosticsPayload } from '../lib/diagnosticsPayload'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useWebsocket } from '../context/streaming/websocket'
 import { useSettings } from '../hooks/settingsContextValue'
 import Button from './ui/Button'
 import ServerLogDisplay from './ServerLogDisplay'
@@ -10,8 +11,8 @@ const MODAL_BUTTON = 'p-[0.5cqh_1.78cqh] text-[2.49cqh]'
 
 const ConnectionLostOverlay = () => {
   const { t } = useTranslation()
-  const { connectionLost, cancelConnection, reconnectAfterConnectionLost, server, websocket, error, statusStage } =
-    useStreaming()
+  const { connectionLost, cancelConnection, reconnectAfterConnectionLost, server, error, statusStage } = useConnection()
+  const websocket = useWebsocket()
   const { settings, isServerMode } = useSettings()
 
   const errorDetail = error

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useFrames } from '../context/streaming/frames'
 import { useSettings } from '../hooks/settingsContextValue'
 import Sparkline from './Sparkline'
 
@@ -60,8 +61,8 @@ const computeFrametimeStats = (entries: { time: number; value: number }[]): Fram
 }
 
 const PerformanceStatsOverlay = () => {
-  const { isStreaming, server, frames } = useStreaming()
-  const { inputLatency, latentGenMs, temporalCompression, id: frameId } = frames
+  const { isStreaming, server } = useConnection()
+  const { inputLatency, latentGenMs, temporalCompression, id: frameId } = useFrames()
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.performance_stats
   const quant = settings.engine_quant ?? 'none'

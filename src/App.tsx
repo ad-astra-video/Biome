@@ -4,7 +4,8 @@ import { SettingsProvider } from './hooks/useSettings'
 import { PortalProvider } from './context/PortalContext'
 import { usePortal } from './context/portalContextValue'
 import { StreamingProvider } from './context/StreamingContext'
-import { useStreaming } from './context/streamingContextValue'
+import { useConnection } from './context/streaming/connection'
+import { useSession } from './context/streaming/session'
 import { VortexProvider } from './context/VortexContext'
 import { AudioProvider } from './context/AudioContext'
 import { useAudio } from './context/audioContextValue'
@@ -96,8 +97,8 @@ const AppShell = () => {
     toggleSettings,
     transitionTo
   } = usePortal()
-  const { isStreaming, isUIActive, connectionStatus, prepareReturnToMainMenu, session } = useStreaming()
-  const sceneEditState = session.sceneEdit.state
+  const { isStreaming, isUIActive, status: connectionStatus, prepareReturnToMainMenu } = useConnection()
+  const sceneEditState = useSession().sceneEdit.state
   useGamepadNavigation(isUIActive)
   const {
     getBackgroundVideoElement,

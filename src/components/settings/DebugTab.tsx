@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { buildDiagnosticsPayload } from '../../lib/diagnosticsPayload'
 import { ENGINE_MODES, type Settings } from '../../types/settings'
-import { useStreaming } from '../../context/streamingContextValue'
+import { useConnection } from '../../context/streaming/connection'
+import { useWebsocket } from '../../context/streaming/websocket'
 import SettingsSection from '../ui/SettingsSection'
 import SettingsRow from '../ui/SettingsRow'
 import SettingsCheckbox from '../ui/SettingsCheckbox'
@@ -20,7 +21,8 @@ type DebugTabProps = {
 
 const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }, ref) => {
   const { t } = useTranslation()
-  const { server, websocket } = useStreaming()
+  const { server } = useConnection()
+  const websocket = useWebsocket()
   const isServerMode = settings.engine_mode === ENGINE_MODES.SERVER
   const [menuPerformanceStats, setMenuPerformanceStats] = useState(settings.debug_overlays.performance_stats)
   const [menuInputOverlay, setMenuInputOverlay] = useState(settings.debug_overlays.input)

@@ -28,7 +28,7 @@ function fileRecordsToSeedRecords(records: SeedFileRecord[]): SeedRecord[] {
     .sort((a, b) => a.filename.localeCompare(b.filename))
 }
 
-export const useSeeds = (): UseSeedsResult => {
+export const useSeedsDir = (): UseSeedsResult => {
   const [seeds, setSeeds] = useState<SeedRecord[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -124,4 +124,4 @@ export const useSeeds = (): UseSeedsResult => {
   }
 }
 
-export default useSeeds
+export default useSeedsDir
