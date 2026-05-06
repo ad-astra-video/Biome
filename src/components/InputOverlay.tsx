@@ -271,7 +271,8 @@ const computeSimulatedKBM = (pressedGamepad: Set<InputCode>): Set<InputCode> => 
 }
 
 const InputOverlay = () => {
-  const { isStreaming, pressedKeys, mouseButtons, pressedGamepad, scrollActive } = useStreaming()
+  const { isStreaming, input } = useStreaming()
+  const { pressedKeys, mouseButtons, pressedGamepad, scrollActive } = input
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.input
   const gamepadSensitivity = settings.gamepad_sensitivity

@@ -824,12 +824,18 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     clearWsLogs,
 
     // Input state
-    pressedKeys,
-    mouseButtons,
-    pressedGamepad,
-    scrollActive,
-    isPointerLocked,
-    pointerLockBlockedSeq,
+    input: {
+      pressedKeys,
+      mouseButtons,
+      pressedGamepad,
+      scrollActive,
+      pointerLock: {
+        isLocked: isPointerLocked,
+        blockedSeq: pointerLockBlockedSeq,
+        request: requestPointerLock,
+        exit: exitPointerLock
+      }
+    },
 
     // Actions
     connect,
@@ -841,8 +847,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     prepareReturnToMainMenu,
     resetScene,
     resume,
-    requestPointerLock,
-    exitPointerLock,
     registerContainerRef,
     registerCanvasRef,
     handleContainerClick

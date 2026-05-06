@@ -77,15 +77,24 @@ export type StreamingContextValue = {
   wsAllLogs: LogRecord[]
   clearWsLogs: () => void
 
-  /** Physical keyboard `InputCode`s currently held down (e.g. `'KeyW'`, `'ArrowUp'`). */
-  pressedKeys: Set<InputCode>
-  /** Physical mouse `InputCode`s currently held down (e.g. `'MouseLeft'`). */
-  mouseButtons: Set<InputCode>
-  /** Gamepad `InputCode`s currently held down (e.g. `'GamepadA'`, `'GamepadLeftStickUp'`). */
-  pressedGamepad: Set<InputCode>
-  scrollActive: { up: boolean; down: boolean }
-  isPointerLocked: boolean
-  pointerLockBlockedSeq: number
+  /** Live input state (held inputs + pointer lock). */
+  input: {
+    /** Physical keyboard `InputCode`s currently held down (e.g. `'KeyW'`, `'ArrowUp'`). */
+    pressedKeys: Set<InputCode>
+    /** Physical mouse `InputCode`s currently held down (e.g. `'MouseLeft'`). */
+    mouseButtons: Set<InputCode>
+    /** Gamepad `InputCode`s currently held down (e.g. `'GamepadA'`, `'GamepadLeftStickUp'`). */
+    pressedGamepad: Set<InputCode>
+    scrollActive: { up: boolean; down: boolean }
+    pointerLock: {
+      isLocked: boolean
+      /** Bumped when a pointer-lock request is denied by the browser
+       *  cooldown; consumers watch this to play feedback sounds. */
+      blockedSeq: number
+      request: () => boolean
+      exit: () => void
+    }
+  }
 
   connect: (endpointUrl: string) => void
   disconnect: () => void
@@ -96,8 +105,6 @@ export type StreamingContextValue = {
   prepareReturnToMainMenu: () => Promise<void>
   resetScene: () => void
   resume: () => void
-  requestPointerLock: () => boolean
-  exitPointerLock: () => void
   registerContainerRef: (element: HTMLDivElement | null) => void
   registerCanvasRef: (element: HTMLCanvasElement | null) => void
   handleContainerClick: () => void

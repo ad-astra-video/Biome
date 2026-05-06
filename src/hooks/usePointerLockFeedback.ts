@@ -9,7 +9,8 @@ import { useStreaming } from '../context/streamingContextValue'
  */
 export function usePointerLockFeedback(isActive: boolean) {
   const { play } = useAudio()
-  const { canUnpause, unlockDelayMs, pauseElapsedMs, pointerLockBlockedSeq } = useStreaming()
+  const { canUnpause, unlockDelayMs, pauseElapsedMs, input } = useStreaming()
+  const pointerLockBlockedSeq = input.pointerLock.blockedSeq
   const [showUnlockHint, setShowUnlockHint] = useState(false)
   const lastBlockedSeqRef = useRef(pointerLockBlockedSeq)
 

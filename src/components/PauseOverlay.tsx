@@ -15,7 +15,8 @@ import { useSettings } from '../hooks/settingsContextValue'
 import { FocusScope } from '../context/FocusScopeContext'
 
 const PauseOverlayContent = () => {
-  const { requestPointerLock, wsRequest, selectSeed } = useStreaming()
+  const { input, wsRequest, selectSeed } = useStreaming()
+  const requestPointerLock = input.pointerLock.request
   const { settings } = useSettings()
   const pauseMenuCode = settings.keybindings.pauseMenu
   const [view, setView] = useState<PauseViewKey>(PAUSE_VIEW.MAIN)
