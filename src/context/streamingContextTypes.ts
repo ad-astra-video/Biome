@@ -52,17 +52,28 @@ export type StreamingContextValue = {
   endpointUrl: string | null
   setEndpointUrl: (url: string | null) => void
 
-  isServerRunning: boolean
-  engineReady: boolean
-  serverLogPath: string | null
-  engineStatus: EngineStatus | null
-  checkEngineStatus: () => Promise<EngineStatus | null>
-  setupEngine: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
-  nukeAndReinstallEngine: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
-  abortEngineSetup: () => Promise<string>
-  engineSetupInProgress: boolean
-  setupProgress: string | null
-  engineSetupError: string | null
+  /** Local engine state + actions. Only meaningful in standalone mode;
+   *  in server mode the fields are inert (status null, isReady/isRunning
+   *  false, setup is a no-op). */
+  engine: {
+    status: EngineStatus | null
+    /** UV installed + repo cloned + dependencies synced. */
+    isReady: boolean
+    /** Standalone Python server process is running. */
+    isRunning: boolean
+    serverLogPath: string | null
+    check: () => Promise<EngineStatus | null>
+    setup: {
+      inProgress: boolean
+      progress: string | null
+      error: string | null
+      /** Run install / sync from current state — fixes a partial setup. */
+      run: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
+      /** Wipe the engine dir and re-run from scratch. */
+      nukeAndReinstall: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
+      abort: () => Promise<string>
+    }
+  }
 
   openSeedsDir: () => Promise<void>
   seedsDir: string | null

@@ -812,19 +812,22 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     endpointUrl,
     setEndpointUrl,
 
-    // Standalone engine state
-    isServerRunning,
-    engineReady,
-    serverLogPath,
-    // Engine setup/status (shared state for all components)
-    engineStatus,
-    checkEngineStatus,
-    setupEngine,
-    nukeAndReinstallEngine,
-    abortEngineSetup: abortEngineInstall,
-    engineSetupInProgress,
-    setupProgress,
-    engineSetupError,
+    // Standalone engine state + actions
+    engine: {
+      status: engineStatus,
+      isReady: engineReady,
+      isRunning: isServerRunning,
+      serverLogPath,
+      check: checkEngineStatus,
+      setup: {
+        inProgress: engineSetupInProgress,
+        progress: setupProgress,
+        error: engineSetupError,
+        run: setupEngine,
+        nukeAndReinstall: nukeAndReinstallEngine,
+        abort: abortEngineInstall
+      }
+    },
 
     // Seeds
     openSeedsDir,

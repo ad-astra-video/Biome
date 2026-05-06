@@ -55,7 +55,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const { settings, active, menuEngineMode, setMenuEngineMode } = props
   const { t } = useTranslation()
   const { saveSettings } = useSettings()
-  const { engineStatus, checkEngineStatus, setupEngine, nukeAndReinstallEngine } = useStreaming()
+  const { engine } = useStreaming()
 
   const configEngineMode = settings.engine_mode
   const configWorldModel = settings.engine_model
@@ -90,8 +90,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     ? /^\s*wss:\/\//i.test(menuServerUrl)
     : /^\s*https:\/\//i.test(menuServerUrl)
 
-  const engineReady = engineStatus
-    ? engineStatus.uv_installed && engineStatus.repo_cloned && engineStatus.dependencies_synced
+  const engineReady = engine.status
+    ? engine.status.uv_installed && engine.status.repo_cloned && engine.status.dependencies_synced
     : null
 
   useImperativeHandle(
@@ -145,9 +145,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
   useEffect(() => {
     if (menuEngineMode === 'standalone') {
-      checkEngineStatus().catch(() => null)
+      engine.check().catch(() => null)
     }
-  }, [menuEngineMode, checkEngineStatus])
+  }, [menuEngineMode, engine])
 
   const serverUrlStatusRef = useRef(serverUrlStatus)
   serverUrlStatusRef.current = serverUrlStatus
@@ -326,10 +326,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     setShowFixModal(false)
     setShowLocalInstallLog(true)
     try {
-      await setupEngine()
-      await checkEngineStatus()
+      await engine.setup.run()
+      await engine.check()
     } catch {
-      // Error is surfaced by engineSetupError and server logs.
+      // Error is surfaced by engine.setup.error and server logs.
     }
   }
 
@@ -337,10 +337,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     setShowNukeModal(false)
     setShowLocalInstallLog(true)
     try {
-      await nukeAndReinstallEngine()
-      await checkEngineStatus()
+      await engine.setup.nukeAndReinstall()
+      await engine.check()
     } catch {
-      // Error is surfaced by engineSetupError and server logs.
+      // Error is surfaced by engine.setup.error and server logs.
     }
   }
 

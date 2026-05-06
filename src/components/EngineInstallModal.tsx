@@ -15,34 +15,35 @@ type EngineInstallModalProps = {
 
 const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
   const { t } = useTranslation()
-  const { engineSetupInProgress, setupProgress, engineSetupError, abortEngineSetup, server } = useStreaming()
+  const { engine, server } = useStreaming()
+  const setup = engine.setup
   const { logs: installLogs, clear: clearInstallLogs } = useEngineLogs(true)
   const [isExportingInstallDiagnostics, setIsExportingInstallDiagnostics] = useState(false)
   const [isAbortingInstall, setIsAbortingInstall] = useState(false)
   const [installExportStatus, setInstallExportStatus] = useState<string | null>(null)
 
   useEffect(() => {
-    if (engineSetupInProgress) {
+    if (setup.inProgress) {
       clearInstallLogs()
       setInstallExportStatus(null)
     }
-  }, [engineSetupInProgress, clearInstallLogs])
+  }, [setup.inProgress, clearInstallLogs])
 
   const buildPayload = useCallback(
     () =>
       buildDiagnosticsPayload({
         server,
         error: {
-          message: engineSetupError,
-          stage: setupProgress,
-          in_progress: engineSetupInProgress
+          message: setup.error,
+          stage: setup.progress,
+          in_progress: setup.inProgress
         },
         // Install runs entirely on the Electron side — no WS connection
         // yet — so the Electron-process tail (pulled by the builder) is
         // the only log source.
         serverLogs: []
       }),
-    [server, engineSetupError, engineSetupInProgress, setupProgress]
+    [server, setup.error, setup.inProgress, setup.progress]
   )
 
   const handleExportInstallDiagnostics = async () => {
@@ -73,7 +74,7 @@ const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
     setIsAbortingInstall(true)
     setInstallExportStatus(null)
     try {
-      const message = await abortEngineSetup()
+      const message = await setup.abort()
       setInstallExportStatus(message || t('app.dialogs.install.abortRequested'))
     } catch (abortErr) {
       const message = abortErr instanceof Error ? abortErr.message : t('app.dialogs.install.abortFailed')
@@ -91,29 +92,29 @@ const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
     >
       <FocusScope
         autoFocus
-        onCancel={engineSetupInProgress ? undefined : onClose}
+        onCancel={setup.inProgress ? undefined : onClose}
         className="pointer-events-auto w-[135.11cqh] max-w-[92vw]"
       >
         <ServerLogDisplay
           title="app.dialogs.install.title"
           logs={installLogs}
-          showProgress={engineSetupInProgress}
+          showProgress={setup.inProgress}
           progressMessage={
-            engineSetupInProgress
-              ? setupProgress || t('app.dialogs.install.installing')
-              : engineSetupError
+            setup.inProgress
+              ? setup.progress || t('app.dialogs.install.installing')
+              : setup.error
                 ? t('app.dialogs.install.failed')
                 : t('app.dialogs.install.complete')
           }
-          errorMessage={engineSetupError}
+          errorMessage={setup.error}
           buildDiagnosticsPayload={buildPayload}
-          showExportAction={!engineSetupInProgress && !!engineSetupError}
+          showExportAction={!setup.inProgress && !!setup.error}
           onExportAction={() => void handleExportInstallDiagnostics()}
           isExportingAction={isExportingInstallDiagnostics}
           exportActionLabel="app.buttons.saveReport"
           actionStatus={installExportStatus}
           headerAction={
-            engineSetupInProgress ? (
+            setup.inProgress ? (
               <div className="flex items-center gap-[0.8cqh]">
                 <Button
                   variant="secondary"
