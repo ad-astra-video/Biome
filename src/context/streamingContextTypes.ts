@@ -14,6 +14,11 @@ export type StreamingStats = {
 
 export type StreamingContextValue = {
   connectionStatus: ConnectionStatus
+  /** Canonical user-visible error for the engine session: the sticky
+   *  warm-flow / lifecycle error if one is set, otherwise the transport
+   *  error from the connection union. Components that show error UI
+   *  should read this; the underlying split is an internal detail. */
+  error: TranslatableError | null
   connectionLost: boolean
   isVideoReady: boolean
   isStreaming: boolean
@@ -49,8 +54,6 @@ export type StreamingContextValue = {
 
   isServerRunning: boolean
   engineReady: boolean
-  engineError: TranslatableError | null
-  clearEngineError: () => void
   serverLogPath: string | null
   engineStatus: EngineStatus | null
   checkEngineStatus: () => Promise<EngineStatus | null>

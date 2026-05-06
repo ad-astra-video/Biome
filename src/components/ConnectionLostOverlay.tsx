@@ -1,7 +1,6 @@
 import { useCallback } from 'react'
 import { buildDiagnosticsPayload } from '../lib/diagnosticsPayload'
 import { useStreaming } from '../context/streamingContextValue'
-import { connectionError } from '../hooks/useWebSocket'
 import { useSettings } from '../hooks/settingsContextValue'
 import Button from './ui/Button'
 import ServerLogDisplay from './ServerLogDisplay'
@@ -16,21 +15,15 @@ const ConnectionLostOverlay = () => {
     cancelConnection,
     reconnectAfterConnectionLost,
     connection,
-    connectionStatus,
     wsLogs,
     wsAllLogs,
-    engineError,
+    error,
     statusStage
   } = useStreaming()
-  const error = connectionError(connectionStatus)
   const { settings, isServerMode } = useSettings()
 
-  // Same resolution logic as TerminalDisplay — prefer engineError, fall back to raw WS error.
-  const activeError = engineError ?? error
-  const errorDetail = activeError
-    ? String(
-        t(activeError.translationKey, { defaultValue: activeError.translationKey, ...activeError.translationParams })
-      )
+  const errorDetail = error
+    ? String(t(error.translationKey, { defaultValue: error.translationKey, ...error.translationParams }))
     : null
 
   const handleReturnToMainMenu = () => {

@@ -4,7 +4,6 @@ import type { TranslationKey } from '../i18n'
 import { buildDiagnosticsPayload } from '../lib/diagnosticsPayload'
 import { resolveStage } from '../stages'
 import { useStreaming } from '../context/streamingContextValue'
-import { connectionError } from '../hooks/useWebSocket'
 import { useVortex } from '../context/vortexContextValue'
 import { useSettings } from '../hooks/settingsContextValue'
 import { useEngineLogs } from '../hooks/useEngineLogs'
@@ -26,17 +25,8 @@ type TerminalDisplayProps = {
 
 const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   const { t } = useTranslation()
-  const {
-    connectionStatus,
-    statusStage,
-    isFreshInstall,
-    engineError,
-    cancelConnection,
-    wsLogs,
-    wsAllLogs,
-    connection
-  } = useStreaming()
-  const error = connectionError(connectionStatus)
+  const { connectionStatus, statusStage, isFreshInstall, error, cancelConnection, wsLogs, wsAllLogs, connection } =
+    useStreaming()
   const { setErrorMode } = useVortex()
   const { isServerMode, settings } = useSettings()
   const { logs: engineLogs } = useEngineLogs(!isServerMode)
@@ -46,11 +36,8 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
   const [exportStatus, setExportStatus] = useState<string | null>(null)
   const logsPanelHeight = '36cqh'
 
-  const activeError = engineError ?? error
-  const errorDetail = activeError
-    ? String(
-        t(activeError.translationKey, { defaultValue: activeError.translationKey, ...activeError.translationParams })
-      )
+  const errorDetail = error
+    ? String(t(error.translationKey, { defaultValue: error.translationKey, ...error.translationParams }))
     : null
 
   // Extract the first non-empty line from the error for the inline display

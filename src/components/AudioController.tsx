@@ -2,7 +2,6 @@ import { useEffect, useRef } from 'react'
 import { useAudio } from '../context/audioContextValue'
 import { usePortal } from '../context/portalContextValue'
 import { useStreaming } from '../context/streamingContextValue'
-import { connectionError } from '../hooks/useWebSocket'
 
 /** Duration in seconds for music crossfades. */
 const MUSIC_FADE_S = 0.5
@@ -14,8 +13,7 @@ const MUSIC_FADE_S = 0.5
 const AudioController = () => {
   const { play, fadeOutLoop, crossfadeLoop, stopAllLoops } = useAudio()
   const { state, states } = usePortal()
-  const { connectionStatus, engineError, isPaused } = useStreaming()
-  const error = connectionError(connectionStatus)
+  const { error, isPaused } = useStreaming()
   const prevHasErrorRef = useRef(false)
   // Manage ambient loops based on portal state
   useEffect(() => {
@@ -47,12 +45,12 @@ const AudioController = () => {
 
   // On error during loading: play error sound
   useEffect(() => {
-    const hasError = !!(error || engineError)
+    const hasError = !!error
     if (hasError && !prevHasErrorRef.current) {
       play('error')
     }
     prevHasErrorRef.current = hasError
-  }, [error, engineError, play])
+  }, [error, play])
 
   // Cleanup on unmount
   useEffect(() => {

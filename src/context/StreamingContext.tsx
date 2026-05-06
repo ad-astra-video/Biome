@@ -10,7 +10,11 @@ import {
   streamingLifecycleReducer,
   STREAMING_LIFECYCLE_EVENT
 } from './streamingLifecycleMachine'
-import useWebSocket, { isConnected as wsIsConnected, isReady as wsIsReady } from '../hooks/useWebSocket'
+import useWebSocket, {
+  isConnected as wsIsConnected,
+  isReady as wsIsReady,
+  connectionError as wsConnectionError
+} from '../hooks/useWebSocket'
 import useGameInput from '../hooks/useGameInput'
 import { useSettings } from '../hooks/settingsContextValue'
 import { ENGINE_MODES, DEFAULT_WORLD_ENGINE_MODEL, type Settings } from '../types/settings'
@@ -105,6 +109,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   } = useWebSocket()
   const isConnected = wsIsConnected(connectionStatus)
   const isReady = wsIsReady(connectionStatus)
+  const transportError = wsConnectionError(connectionStatus)
   const { getSeedsDirPath, openSeedsDir, seedsDir } = useSeeds()
 
   const [isPaused, setIsPaused] = useState(false)
@@ -772,6 +777,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const value: StreamingContextValue = {
     // Connection state
     connectionStatus,
+    error: engineError ?? transportError,
     connectionLost,
     isVideoReady: hasReceivedFrame && canvasReady,
     isStreaming,
@@ -809,8 +815,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     // Standalone engine state
     isServerRunning,
     engineReady,
-    engineError,
-    clearEngineError: () => setEngineError(null),
     serverLogPath,
     // Engine setup/status (shared state for all components)
     engineStatus,
