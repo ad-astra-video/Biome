@@ -286,7 +286,7 @@ const goose = {
           description: 'want to record your flight?',
           enabled: 'Record Gameplay',
           enabledDescription: "Saves smooth filmstrips at the model's full framerate.",
-          outputFolder: 'Nesting folder',
+          outputFolder: 'Nesting Folder',
           outputFolderHint: 'Leave blank to use the usual migration route.',
           browse: 'Waddle to folder...',
           manage: 'Manage Footage',

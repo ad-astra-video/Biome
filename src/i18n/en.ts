@@ -285,7 +285,7 @@ const en = {
           description: 'want to record your gameplay?',
           enabled: 'Record Gameplay',
           enabledDescription: "Saves smooth videos at the model's full framerate.",
-          outputFolder: 'Output folder',
+          outputFolder: 'Output Folder',
           outputFolderHint: 'Leave blank to use the system default.',
           browse: 'Browse...',
           manage: 'Manage Recordings',
