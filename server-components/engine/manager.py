@@ -446,11 +446,12 @@ class WorldEngineManager:
             self._log_device_memory("after pre-load cleanup")
 
             # Resolve backend classes lazily so the chosen package is
-            # only imported when actually used. Re-resolves only when
-            # the backend changes — `_resolve_backend` itself is a
-            # cheap `importlib.import_module` lookup, but the real
-            # cost is the first import of `quark` or `world_engine`
-            # which triggers torch / coremltools / etc. eager imports.
+            # only imported when actually used. Re-resolves on first
+            # load and whenever the backend changes — `_resolve_backend`
+            # itself is a cheap `importlib.import_module` lookup, but
+            # the real cost is the first import of `quark` or
+            # `world_engine` which triggers torch / coremltools / etc.
+            # eager imports.
             if not backend_unchanged or self._engine_cls is None:
                 engine_cls, ctrl_input_cls = _resolve_backend(requested_backend)
                 self._engine_cls = engine_cls

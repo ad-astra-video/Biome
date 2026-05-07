@@ -65,16 +65,7 @@ llama-cpp-python = [
   { url = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.36-cu128-Basic-linux-20260416/llama_cpp_python-0.3.36%2Bcu128.basic-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
   { url = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.36-cu128-Basic-win-20260417/llama_cpp_python-0.3.36%2Bcu128.basic-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
-# Pin to the ``experimental/biome-base`` integration branch on quark —
-# combines the native-Metal driver (``remove-mlx`` PR #21) with the
-# standalone Engine API and the Apple-Silicon-specific tweaks for
-# ``Engine`` (TAEHV VAE on the ANE via CoreML through HF, manual
-# eager loop, weight pinning, sync=False commit overlap, mutex on
-# the dispatcher's fence map, and the just-landed
-# ``taehv_cache_dir=`` kwarg for app-managed artifact storage).
-# Bump the rev to update; the integration branch is the merge base
-# for both upstream PRs and won't head to quark/main until those
-# both land.
+# Pins to a commit on Quark main. Bump the rev to update.
 quark = { git = "https://github.com/Overworldai/quark.git", rev = "c37860209c6e22c79e7c0ec27be69e6df4a21154" }
 
 [[tool.uv.index]]
