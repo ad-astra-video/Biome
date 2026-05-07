@@ -75,7 +75,7 @@ llama-cpp-python = [
 # Bump the rev to update; the integration branch is the merge base
 # for both upstream PRs and won't head to quark/main until those
 # both land.
-quark = { git = "https://github.com/Overworldai/quark.git", rev = "c2a87ba" }
+quark = { git = "https://github.com/Overworldai/quark.git", rev = "c37860209c6e22c79e7c0ec27be69e6df4a21154" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
