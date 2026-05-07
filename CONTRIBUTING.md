@@ -12,18 +12,20 @@ npm run lint         # Check formatting (Prettier) + type-check (tsc)
 npm run lint-fix     # Auto-fix formatting (Prettier) + type-check (tsc) — run after finishing work
 ```
 
-For the Python server in `server-components/`, run lint and type-check with:
+For the Python server in `server-components/`:
 
-```bash
+````bash
 cd server-components
+
+# Auto-fix during / after work:
+uvx ruff format .         # Format
+uvx ruff check --fix .    # Lint with safe auto-fixes
+
+# CI gates — must pass before a commit lands:
 uvx ruff check .          # Lint
-uvx ruff format .         # Auto-format (also: --check to verify without rewriting)
-uvx ruff check --fix .    # Auto-fix lint issues where ruff has a safe rewrite
 uvx basedpyright .        # Type-check (strict mode)
 uv lock --check           # Verify uv.lock is in sync with pyproject.toml
-```
-
-All must pass before a commit lands. The typed Pydantic boundaries in `server/protocol.py` and the `Connection` invariants in `server/session/` are what we rely on to catch real semantic errors.
+``` The typed Pydantic boundaries in `server/protocol.py` and the `Connection` invariants in `server/session/` are what we rely on to catch real semantic errors.
 
 No test framework is configured.
 
@@ -33,9 +35,9 @@ No test framework is configured.
 
 `pyproject.toml` carries **zero project-wide ruff or basedpyright suppressions** — every silenced lint/type report is scoped to the line or file that triggers it, so a new violation in pure-Python code surfaces under strict mode. Three layers, in order of preference:
 
-1. **Fix the underlying issue.** Narrow `except Exception` to the actual raisers (`OSError`, `pydantic.ValidationError`, `binascii.Error`, etc.); add a `_require_X()` helper instead of repeating `if self._x is None: raise` (see `WorldEngineManager._require_engine`); hoist module-level loops into a function so cleanup vars don't leak; replace `try/except/pass` with `contextlib.suppress(...)`.
-2. **Per-line ignore.** `# noqa: BLE001  -- <reason>` for ruff, `# pyright: ignore[reportXxx]  -- <reason>` for basedpyright. The trailing `-- <reason>` is required — ruff and pyright both ignore everything after the rule, but future readers shouldn't have to guess. Stack both on one line if needed: `# noqa: BLE001  # pyright: ignore[reportUnusedExcept]  -- ...`.
-3. **Per-file pragma.** `# pyright: reportUnknownMemberType=none, ...` at the top of the module (after the docstring). Only for files that touch torch / `world_engine` / diffusers / transformers / `llama_cpp` / pynvml / `py-cpuinfo` — third-party libs whose stubs are partial or absent. Add a rule to the pragma only if it fires on third-party type leakage; never to silence a real local issue. Ruff has no equivalent — use per-line `# noqa` everywhere.
+1. **Fix the underlying issue.** Narrow `except Exception` to the specific raisers; add a `_require_X()` helper instead of repeating `if self._x is None: raise` (see `WorldEngineManager._require_engine`); replace `try/except/pass` with `contextlib.suppress(...)`.
+2. **Per-line ignore.** `# noqa: BLE001  -- <reason>` for ruff, `# pyright: ignore[reportXxx]  -- <reason>` for basedpyright. The trailing `-- <reason>` is required — ruff and pyright both ignore everything after the rule, but future readers shouldn't have to guess. Stack both on one line if needed.
+3. **Per-file pragma.** `# pyright: reportUnknownMemberType=none, ...` at the top of the module. Only for files that touch third-party libs with partial/absent stubs (torch, transformers, diffusers, `llama_cpp`, etc.). Add a rule only if it fires on third-party type leakage; never to silence a real local issue. Ruff has no equivalent — use per-line `# noqa` everywhere.
 
 ### Concrete exception classes
 
@@ -73,3 +75,4 @@ Prettier with: no semicolons, single quotes, arrow parens always, 120 char width
 
 - [Cutting a Release](docs/release.md) — release script and manual checklist
 - [Running Offline](docs/offline.md) — `bwrap` network namespace
+````
