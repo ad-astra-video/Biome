@@ -75,8 +75,12 @@ export const initialStreamingLifecycleState: StreamingLifecycleState = {
 export type StreamingLifecycleSyncPayload = {
   portalState: PortalState
   connectionStatus: ConnectionStatus
-  selectedModel: string
-  lastAppliedModel: string | null
+  /** Opaque signature of all session-class settings; built by
+   *  `getSessionSignature` in `types/settings.ts`. The reducer doesn't
+   *  care what's in it — only whether it differs from
+   *  `lastAppliedSession`. */
+  currentSessionSig: string
+  lastAppliedSession: string | null
   engineError: TranslatableError | null
   hasReceivedFrame: boolean
   initCompleted: boolean
@@ -100,8 +104,8 @@ export const streamingLifecycleReducer = (
   const {
     portalState,
     connectionStatus,
-    selectedModel,
-    lastAppliedModel,
+    currentSessionSig,
+    lastAppliedSession,
     engineError,
     hasReceivedFrame,
     initCompleted,
@@ -123,7 +127,7 @@ export const streamingLifecycleReducer = (
   const socketOpen = connectionStatus.kind === 'loading' || connectionStatus.kind === 'ready'
   const socketReady = connectionStatus.kind === 'ready'
 
-  const shouldIntentionalReconnect = inStreamingState && socketOpen && selectedModel !== lastAppliedModel
+  const shouldIntentionalReconnect = inStreamingState && socketOpen && currentSessionSig !== lastAppliedSession
 
   const enteredLoading = inLoadingState && state.lastPortalState !== PORTAL_STATES.LOADING
   if (enteredLoading) {
