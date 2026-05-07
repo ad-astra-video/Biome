@@ -14,7 +14,7 @@ npm run lint-fix     # Auto-fix formatting (Prettier) + type-check (tsc) — run
 
 For the Python server in `server-components/`:
 
-````bash
+```bash
 cd server-components
 
 # Auto-fix during / after work:
@@ -25,7 +25,9 @@ uvx ruff check --fix .    # Lint with safe auto-fixes
 uvx ruff check .          # Lint
 uvx basedpyright .        # Type-check (strict mode)
 uv lock --check           # Verify uv.lock is in sync with pyproject.toml
-``` The typed Pydantic boundaries in `server/protocol.py` and the `Connection` invariants in `server/session/` are what we rely on to catch real semantic errors.
+```
+
+The typed Pydantic boundaries in `server/protocol.py` and the `Connection` invariants in `server/session/` are what we rely on to catch real semantic errors.
 
 No test framework is configured.
 
@@ -84,4 +86,3 @@ Prettier with: no semicolons, single quotes, arrow parens always, 120 char width
 
 - [Cutting a Release](docs/release.md) — release script and manual checklist
 - [Running Offline](docs/offline.md) — `bwrap` network namespace
-````
