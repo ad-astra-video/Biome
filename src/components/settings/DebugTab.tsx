@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { buildDiagnosticsPayload } from '../../lib/diagnosticsPayload'
 import { ENGINE_MODES, type Settings } from '../../types/settings'
-import { useStreaming } from '../../context/streamingContextValue'
+import { useConnection } from '../../context/streaming/connection'
+import { useWebsocket } from '../../context/streaming/websocket'
 import SettingsSection from '../ui/SettingsSection'
 import SettingsRow from '../ui/SettingsRow'
 import SettingsCheckbox from '../ui/SettingsCheckbox'
@@ -20,7 +21,8 @@ type DebugTabProps = {
 
 const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }, ref) => {
   const { t } = useTranslation()
-  const { connection, wsAllLogs } = useStreaming()
+  const { server } = useConnection()
+  const websocket = useWebsocket()
   const isServerMode = settings.engine_mode === ENGINE_MODES.SERVER
   const [menuPerformanceStats, setMenuPerformanceStats] = useState(settings.debug_overlays.performance_stats)
   const [menuInputOverlay, setMenuInputOverlay] = useState(settings.debug_overlays.input)
@@ -50,9 +52,9 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
       // setup / lifecycle / settings / etc.); we just hand it the
       // WS-sourced server events.
       const payload = await buildDiagnosticsPayload({
-        connection,
+        server,
         error: { message: null },
-        serverLogs: wsAllLogs,
+        serverLogs: websocket.allLogs,
         session: {
           engineMode: isServerMode ? 'server' : 'standalone',
           requestedModel: settings.engine_model ?? null,
@@ -64,7 +66,7 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
     } catch {
       setDiagnosticsStatus(t('app.settings.debugMetrics.copyFailed'))
     }
-  }, [connection, wsAllLogs, isServerMode, settings.engine_model, settings.engine_quant, t])
+  }, [server, websocket.allLogs, isServerMode, settings.engine_model, settings.engine_quant, t])
 
   return (
     <div className={active ? 'flex flex-col gap-[2.3cqh]' : 'hidden'}>

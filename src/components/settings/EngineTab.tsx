@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '../../bridge'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { ENGINE_MODES, QUANT_OPTIONS, type QuantOption, type Settings } from '../../types/settings'
-import { useSettings } from '../../hooks/settingsContextValue'
-import { useStreaming } from '../../context/streamingContextValue'
+import { useSettings } from '../../hooks/settings/settingsContextValue'
+import { useEngine } from '../../context/streaming/engine'
 import { normalizeServerUrl, toHealthUrl } from '../../utils/serverUrl'
 import SettingsSection from '../ui/SettingsSection'
 import SettingsToggle from '../ui/SettingsToggle'
@@ -13,8 +13,8 @@ import SettingsTextInput from '../ui/SettingsTextInput'
 import SettingsCheckbox from '../ui/SettingsCheckbox'
 import SettingsRow from '../ui/SettingsRow'
 import ConfirmModal from '../ui/ConfirmModal'
-import WorldEngineSection from '../WorldEngineSection'
-import EngineInstallModal from '../EngineInstallModal'
+import WorldEngineSection from '../engine/WorldEngineSection'
+import EngineInstallModal from '../engine/EngineInstallModal'
 
 type MenuModelOption = {
   id: string
@@ -55,7 +55,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const { settings, active, menuEngineMode, setMenuEngineMode } = props
   const { t } = useTranslation()
   const { saveSettings } = useSettings()
-  const { engineStatus, checkEngineStatus, setupEngine, nukeAndReinstallEngine } = useStreaming()
+  const engine = useEngine()
+  const checkEngine = engine.check
 
   const configEngineMode = settings.engine_mode
   const configWorldModel = settings.engine_model
@@ -90,8 +91,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     ? /^\s*wss:\/\//i.test(menuServerUrl)
     : /^\s*https:\/\//i.test(menuServerUrl)
 
-  const engineReady = engineStatus
-    ? engineStatus.uv_installed && engineStatus.repo_cloned && engineStatus.dependencies_synced
+  const engineReady = engine.status
+    ? engine.status.uv_installed && engine.status.repo_cloned && engine.status.dependencies_synced
     : null
 
   useImperativeHandle(
@@ -145,9 +146,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
   useEffect(() => {
     if (menuEngineMode === 'standalone') {
-      checkEngineStatus().catch(() => null)
+      checkEngine().catch(() => null)
     }
-  }, [menuEngineMode, checkEngineStatus])
+  }, [menuEngineMode, checkEngine])
 
   const serverUrlStatusRef = useRef(serverUrlStatus)
   serverUrlStatusRef.current = serverUrlStatus
@@ -326,10 +327,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     setShowFixModal(false)
     setShowLocalInstallLog(true)
     try {
-      await setupEngine()
-      await checkEngineStatus()
+      await engine.setup.run()
+      await engine.check()
     } catch {
-      // Error is surfaced by engineSetupError and server logs.
+      // Error is surfaced by engine.setup.error and server logs.
     }
   }
 
@@ -337,10 +338,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     setShowNukeModal(false)
     setShowLocalInstallLog(true)
     try {
-      await nukeAndReinstallEngine()
-      await checkEngineStatus()
+      await engine.setup.nukeAndReinstall()
+      await engine.check()
     } catch {
-      // Error is surfaced by engineSetupError and server logs.
+      // Error is surfaced by engine.setup.error and server logs.
     }
   }
 
