@@ -1,0 +1,173 @@
+import { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { useInput } from '../../context/streaming/input'
+import { useSeeds } from '../../context/streaming/seeds'
+import { useSession } from '../../context/streaming/session'
+import { useWebsocket } from '../../context/streaming/websocket'
+import MenuSettingsView from '../settings/MenuSettingsView'
+import PauseMainView from './PauseMainView'
+import { PAUSE_VIEW, type PauseViewKey } from '../../constants'
+import { viewFadeVariants } from '../../transitions'
+import { useSeedManager } from '../../hooks/seeds/useSeedManager'
+import { useSceneOrder } from '../../hooks/scene/useSceneOrder'
+import { usePointerLockFeedback } from '../../hooks/input/usePointerLockFeedback'
+import { useSceneActions } from '../../hooks/scene/useSceneActions'
+import { useSceneGeneration } from '../../hooks/scene/useSceneGeneration'
+import type { SeedRecord } from '../../types/app'
+import { useSettings } from '../../hooks/settings/settingsContextValue'
+import { FocusScope } from '../../context/focus/FocusScopeContext'
+
+const PauseOverlayContent = () => {
+  const requestPointerLock = useInput().pointerLock.request
+  const selectSeed = useSeeds().select
+  const websocket = useWebsocket()
+  const { settings } = useSettings()
+  const pauseMenuCode = settings.keybindings.pauseMenu
+  const [view, setView] = useState<PauseViewKey>(PAUSE_VIEW.MAIN)
+  const { selectCooldown } = usePointerLockFeedback(true)
+  /** Filename of the most recently-added scene (via prompt OR upload/paste/drop).
+   *  Drives auto-scroll and the "unpause to play" hint in PauseMainView. */
+  const [lastAddedFilename, setLastAddedFilename] = useState<string | null>(null)
+
+  const {
+    seeds,
+    seedsLoaded,
+    thumbnails,
+    uploadingImage,
+    uploadError,
+    removeScene: removeSceneFile,
+    refreshSeeds,
+    handleImageUpload,
+    handleImageDrop,
+    handleClipboardUpload
+  } = useSeedManager({
+    wsRequest: websocket.request,
+    isActive: true,
+    onPinnedSceneRemoved: (filename: string) => removeScene(filename),
+    // Upload / drop / paste: set the CTA first so it's visible even if things
+    // go wrong. If exactly one image was added, mirror `pasteScene` — tell the
+    // engine to switch to it, then attempt to re-lock the pointer (the file
+    // picker / drop / paste gesture is usually still valid). For multi-file
+    // drops we leave the user on the pause screen with the CTA.
+    onScenesAdded: (filenames: string[]) => {
+      const last = filenames[filenames.length - 1]
+      setLastAddedFilename(last)
+      if (filenames.length === 1) {
+        void selectSeed(last).then(() => requestPointerLock())
+      }
+    }
+  })
+
+  const { sceneIds, removeScene, moveScene } = useSceneOrder({
+    seeds,
+    isLoaded: seedsLoaded
+  })
+
+  const scenes = useMemo(() => {
+    const byFilename = new Map(seeds.map((s) => [s.filename, s]))
+    return sceneIds.map((id) => byFilename.get(id)).filter((s): s is SeedRecord => s !== undefined)
+  }, [seeds, sceneIds])
+
+  const { selectScene } = useSceneActions(handleClipboardUpload, view !== PAUSE_VIEW.SETTINGS)
+
+  const { generateError, isGenerating, generate } = useSceneGeneration({
+    refreshSeeds,
+    isActive: true,
+    setLastAddedFilename
+  })
+
+  useEffect(() => {
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Escape is always a safety-escape; the user's configured pauseMenu key also re-locks.
+      if (e.key !== 'Escape' && e.code !== pauseMenuCode) return
+      // Settings view handles its own Escape (to save draft settings before navigating)
+      if (view === PAUSE_VIEW.SETTINGS) return
+      if (isGenerating) return
+      requestPointerLock()
+    }
+
+    window.addEventListener('keyup', handleKeyUp)
+    return () => window.removeEventListener('keyup', handleKeyUp)
+  }, [view, isGenerating, requestPointerLock, pauseMenuCode])
+
+  return (
+    <FocusScope
+      active={view !== PAUSE_VIEW.SETTINGS}
+      autoFocus
+      onCancel={requestPointerLock}
+      className="pointer-events-auto absolute inset-0 z-45 bg-black/34 backdrop-blur-[1.94cqh]"
+    >
+      <div className="overlay-darken pointer-events-none absolute inset-0" />
+      <AnimatePresence mode="wait">
+        {view === PAUSE_VIEW.SETTINGS ? (
+          <motion.div
+            key={PAUSE_VIEW.SETTINGS}
+            className="absolute inset-0"
+            variants={viewFadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <MenuSettingsView onBack={() => setView(PAUSE_VIEW.MAIN)} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key={PAUSE_VIEW.MAIN}
+            className="absolute inset-0"
+            variants={viewFadeVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+          >
+            <PauseMainView
+              scenes={scenes}
+              thumbnails={thumbnails}
+              selectCooldown={selectCooldown}
+              uploadingImage={uploadingImage}
+              uploadError={uploadError}
+              onSceneSelect={selectScene}
+              onRemoveScene={removeSceneFile}
+              onMoveScene={moveScene}
+              onNavigateSettings={() => setView(PAUSE_VIEW.SETTINGS)}
+              onImageUpload={handleImageUpload}
+              onImageDrop={handleImageDrop}
+              requestPointerLock={requestPointerLock}
+              isGenerating={isGenerating}
+              generateError={generateError}
+              lastAddedFilename={lastAddedFilename}
+              onGenerateScene={generate}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </FocusScope>
+  )
+}
+
+/** The pause menu: shown whenever the user is paused mid-stream. Doubles as
+ *  the first-entry screen (right after LOADING→STREAMING). Self-mounts via
+ *  AnimatePresence so App.tsx just drops `<PauseOverlay />` in and the overlay
+ *  never lingers in the DOM while inactive. */
+const PauseOverlay = () => {
+  const session = useSession()
+  const visible = session.pause.kind === 'paused' && session.sceneEdit.state.phase === 'inactive'
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          key="pause-overlay"
+          className="absolute inset-0 z-45"
+          variants={viewFadeVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+        >
+          <PauseOverlayContent />
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+export default PauseOverlay

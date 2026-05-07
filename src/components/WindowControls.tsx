@@ -2,7 +2,8 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TranslationKey } from '../i18n'
 import { useWindow } from '../hooks/useWindow'
-import { useStreaming } from '../context/streamingContextValue'
+import { useConnection } from '../context/streaming/connection'
+import { useSession } from '../context/streaming/session'
 const noDragRegionStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties
 
 const WindowControlButton = ({
@@ -40,14 +41,15 @@ const WindowControlButton = ({
 
 const WindowControls = () => {
   const { minimize, toggleMaximize, close } = useWindow()
-  const { isStreaming, isPaused } = useStreaming()
+  const { isStreaming } = useConnection()
+  const session = useSession()
   const dragRegionStyle = {
     WebkitAppRegion: 'drag',
     WebkitUserSelect: 'none',
     userSelect: 'none'
   } as CSSProperties
 
-  const hidden = isStreaming && !isPaused
+  const hidden = isStreaming && session.pause.kind !== 'paused'
 
   return (
     <div className="absolute inset-x-0 top-0 z-9998 h-10" style={dragRegionStyle}>

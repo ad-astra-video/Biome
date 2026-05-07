@@ -1,34 +1,35 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { SettingsProvider } from './hooks/useSettings'
-import { PortalProvider } from './context/PortalContext'
-import { usePortal } from './context/portalContextValue'
-import { StreamingProvider } from './context/StreamingContext'
-import { useStreaming } from './context/streamingContextValue'
-import { VortexProvider } from './context/VortexContext'
-import { AudioProvider } from './context/AudioContext'
-import { useAudio } from './context/audioContextValue'
-import AudioController from './components/AudioController'
+import { SettingsProvider } from './hooks/settings/useSettings'
+import { PortalProvider } from './context/portal/PortalContext'
+import { usePortal } from './context/portal/portalContextValue'
+import { StreamingProvider } from './context/streaming/StreamingContext'
+import { useConnection } from './context/streaming/connection'
+import { useSession } from './context/streaming/session'
+import { VortexProvider } from './context/vortex/VortexContext'
+import { AudioProvider } from './context/audio/AudioContext'
+import { useAudio } from './context/audio/audioContextValue'
+import AudioController from './components/audio/AudioController'
 import { useAppStartup } from './hooks/useAppStartup'
 import { invoke } from './bridge'
 import type { AppUpdateInfo } from './types/ipc'
-import VideoContainer from './components/VideoContainer'
-import MenuSettingsView from './components/MenuSettingsView'
-import BackgroundSlideshow from './components/BackgroundSlideshow'
-import PortalPreview from './components/PortalPreview'
-import VortexHost from './components/VortexHost'
-import TerminalDisplay from './components/TerminalDisplay'
-import SocialCtaRow from './components/SocialCtaRow'
+import VideoContainer from './components/streaming/VideoContainer'
+import MenuSettingsView from './components/settings/MenuSettingsView'
+import BackgroundSlideshow from './components/menu/BackgroundSlideshow'
+import PortalPreview from './components/menu/PortalPreview'
+import VortexHost from './components/portal/VortexHost'
+import TerminalDisplay from './components/engine/TerminalDisplay'
+import SocialCtaRow from './components/menu/SocialCtaRow'
 import ViewLabel from './components/ui/ViewLabel'
 import MenuButton from './components/ui/MenuButton'
-import PauseOverlay from './components/PauseOverlay'
-import SceneEditOverlay from './components/SceneEditOverlay'
-import ConnectionLostOverlay from './components/ConnectionLostOverlay'
+import PauseOverlay from './components/pause/PauseOverlay'
+import SceneEditOverlay from './components/scene/SceneEditOverlay'
+import ConnectionLostOverlay from './components/streaming/ConnectionLostOverlay'
 import WindowControls from './components/WindowControls'
 import ConfirmModal from './components/ui/ConfirmModal'
-import useBackgroundCycle from './hooks/useBackgroundCycle'
-import usePortalGlowSample from './hooks/usePortalGlowSample'
-import { usePortalAnimator } from './hooks/usePortalAnimator'
+import useBackgroundCycle from './hooks/scene/useBackgroundCycle'
+import usePortalGlowSample from './hooks/portal/usePortalGlowSample'
+import { usePortalAnimator } from './hooks/portal/usePortalAnimator'
 import {
   PORTAL_SPARKS_DEBUG,
   SCENE_EDIT_DEBUG_PREVIEW,
@@ -38,14 +39,14 @@ import {
   type MenuViewKey
 } from './constants'
 import { viewFadeVariants } from './transitions'
-import PortalSparksConfigurator from './components/PortalSparksConfigurator'
-import PerformanceStatsOverlay from './components/PerformanceStatsOverlay'
-import InputOverlay from './components/InputOverlay'
-import FrameTimelineOverlay from './components/FrameTimelineOverlay'
+import PortalSparksConfigurator from './components/debug/PortalSparksConfigurator'
+import PerformanceStatsOverlay from './components/debug/PerformanceStatsOverlay'
+import InputOverlay from './components/debug/InputOverlay'
+import FrameTimelineOverlay from './components/debug/FrameTimelineOverlay'
 import I18nSync from './components/I18nSync'
-import DevLocaleCycler from './components/DevLocaleCycler'
+import DevLocaleCycler from './components/debug/DevLocaleCycler'
 import FocusReticle from './components/ui/FocusReticle'
-import { useGamepadNavigation } from './hooks/useGamepadNavigation'
+import { useGamepadNavigation } from './hooks/input/useGamepadNavigation'
 import { useTranslation } from 'react-i18next'
 
 const LAUNCH_PRE_SHRINK_MS = 420
@@ -96,7 +97,8 @@ const AppShell = () => {
     toggleSettings,
     transitionTo
   } = usePortal()
-  const { isStreaming, isUIActive, connectionState, prepareReturnToMainMenu, sceneEditState } = useStreaming()
+  const { isStreaming, isUIActive, status: connectionStatus, prepareReturnToMainMenu } = useConnection()
+  const sceneEditState = useSession().sceneEdit.state
   useGamepadNavigation(isUIActive)
   const {
     getBackgroundVideoElement,
@@ -252,7 +254,7 @@ const AppShell = () => {
   const handleLaunch = () => {
     if (
       portalState === portalStates.MAIN_MENU &&
-      connectionState !== 'connecting' &&
+      connectionStatus.kind !== 'connecting' &&
       !isSettingsOpen &&
       transitionPhase === 'idle'
     ) {
