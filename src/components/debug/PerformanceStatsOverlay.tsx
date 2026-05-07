@@ -66,7 +66,11 @@ const PerformanceStatsOverlay = () => {
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.performance_stats
   const quant = settings.engine_quant ?? 'none'
-  const modelLabel = server.model ? (quant !== 'none' ? `${server.model} (${quant})` : server.model) : '—'
+  const backend = settings.engine_backend ?? 'unknown?'
+  const modelLabel = server.model ?? '—'
+  // `bknd[quant]` — quant nests in brackets only when set, since `none` is the
+  // default and `quark` alone reads cleaner than `quark[none]`.
+  const engineLabel = `${backend}${quant !== 'none' ? `[${quant}]` : ''}`
   const [, setTick] = useState(0)
   const [ftStats, setFtStats] = useState<FrametimeStats | null>(null)
 
@@ -149,6 +153,7 @@ const PerformanceStatsOverlay = () => {
       <Row label="CPU" value={systemInfo?.cpu_name ?? '[Unknown CPU]'} color={COLOR_HUD} />
       <Row label="GPU" value={systemInfo?.gpu_name ?? '[Unknown GPU]'} color={COLOR_HUD} />
       <Row label="MDL" value={modelLabel} color={COLOR_WARM} />
+      <Row label="ENGN" value={engineLabel} color={COLOR_HUD} />
       <Row
         label="ROLL"
         value={`${server.inferenceFps ? formatElapsed(frameId / server.inferenceFps) : '--'} (${frameId}f)`}
