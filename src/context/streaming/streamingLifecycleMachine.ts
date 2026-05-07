@@ -133,7 +133,14 @@ export const streamingLifecycleReducer = (
   if (enteredLoading) {
     next.loadingConnectionRequestSeq = state.loadingConnectionRequestSeq + 1
     next.loadingAttempted = false
+    // Clear any prior connection-lost overlay: by entering LOADING we're
+    // either healing from a real disconnect (user clicked reconnect) or
+    // intentionally tearing down (process respawn from useEngineRespawn,
+    // which lives outside this reducer and so can't go through the
+    // intentional-reconnect suppression path).
+    next.connectionLostSignaled = false
     next.effects.clearEngineErrorOnLoadingEntry = true
+    next.effects.clearConnectionLost = true
     next.effects.runLoadingConnection = true
   }
 
