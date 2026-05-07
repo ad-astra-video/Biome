@@ -385,6 +385,20 @@ def run_generator(
             # reflects actual frame-to-frame throughput.
             t0 = time.perf_counter()
 
+            # Latency: when frame pacing is active, encode + send the
+            # previously-stashed batch RIGHT NOW so the encode runs in
+            # parallel with the upcoming pacing sleep instead of being
+            # serialised after the next device dispatch. Without this,
+            # a frame stays in `pending` for the full pacing interval
+            # before reaching the wire — adds ~(frame_interval - gen)
+            # ms to round-trip latency (≈37 ms on wp1.5 360p @ 60fps,
+            # the dominant non-network contributor to inputLatency).
+            # When pacing is off the post-submit ``_flush_pending``
+            # below already overlaps encode with device work, so the
+            # extra call here is a deliberate no-op for that path.
+            if conn.cap_inference_fps:
+                _flush_pending()
+
             # Frame pacing: sleep until target time, just before
             # reading input, so we use the freshest controls.
             if conn.cap_inference_fps and next_frame_time > 0.0:
