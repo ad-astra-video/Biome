@@ -183,7 +183,9 @@ const he = {
           reinstall: 'התקן מחדש',
           fixInPlace: 'תקן במקום',
           totalReinstall: 'התקנה מחדש מלאה',
-          installFirstTooltip: 'התקן את World Engine כדי לשנות את זה'
+          notInstalledTooltip: 'התקן את World Engine כדי לשנות את זה',
+          startingTooltip: 'המתן עד ש-World Engine יסיים לעלות',
+          failedTooltip: 'תקן את World Engine כדי לשנות את זה'
         },
         performance: {
           title: 'הגדרות ביצועים',

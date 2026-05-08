@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { invoke } from '../../bridge'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { ENGINE_MODES, QUANT_OPTIONS, type QuantOption, type Settings } from '../../types/settings'
-import { useEngineLifecycle } from '../../context/engineLifecycle/engineLifecycleContextValue'
+import type { TranslationKey } from '../../i18n'
+import { useEngineLifecycle, type LifecycleState } from '../../context/engineLifecycle/engineLifecycleContextValue'
 import { useConnection } from '../../context/streaming/connection'
 import { normalizeServerUrl, toHealthUrl } from '../../utils/serverUrl'
 import SettingsSection from '../ui/SettingsSection'
@@ -36,6 +37,23 @@ const availableQuantOptions = QUANT_OPTIONS.filter((q) => !isMac || q !== 'fp8w8
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+/** Tooltip explaining why a standalone-mode-gated control is disabled.
+ *  Mirrors the lifecycle's terminal-vs-transient states so the user
+ *  knows whether to wait, fix, or install. Returns undefined for
+ *  `ready` since enabled controls don't need a tooltip. */
+const standaloneTooltip = (kind: LifecycleState['kind']): TranslationKey | undefined => {
+  switch (kind) {
+    case 'not_installed':
+      return 'app.settings.worldEngine.notInstalledTooltip'
+    case 'preparing':
+      return 'app.settings.worldEngine.startingTooltip'
+    case 'failed':
+      return 'app.settings.worldEngine.failedTooltip'
+    case 'ready':
+      return undefined
+  }
 }
 
 export type EngineTabHandle = {
@@ -444,7 +462,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
             (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
           }
           disabledTooltip={
-            menuEngineMode === 'standalone' && !engineReady ? 'app.settings.worldEngine.installFirstTooltip' : undefined
+            menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
           }
           cacheDeleteLabel="app.settings.worldModel.deleteLocalCache"
         />
@@ -474,7 +492,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               value={menuQuant}
               onChange={(v) => setMenuQuant(v as QuantOption)}
               disabled={menuEngineMode === 'standalone' && !engineReady}
-              disabledTooltip="app.settings.worldEngine.installFirstTooltip"
+              disabledTooltip={
+                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+              }
             />
           </SettingsRow>
           <SettingsCheckbox

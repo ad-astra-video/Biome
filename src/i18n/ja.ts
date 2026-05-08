@@ -189,7 +189,9 @@ const ja = {
           reinstall: '再インストール',
           fixInPlace: 'その場で修復',
           totalReinstall: '完全再インストール',
-          installFirstTooltip: '変更するにはワールドエンジンをインストールしてください'
+          notInstalledTooltip: '変更するにはワールドエンジンをインストールしてください',
+          startingTooltip: 'ワールドエンジンの起動が完了するまでお待ちください',
+          failedTooltip: '変更するにはワールドエンジンを修復してください'
         },
         performance: {
           title: 'パフォーマンス設定',

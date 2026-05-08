@@ -190,7 +190,9 @@ const en = {
           reinstall: 'Reinstall',
           fixInPlace: 'Fix In Place',
           totalReinstall: 'Total Reinstall',
-          installFirstTooltip: 'Install World Engine to change this'
+          notInstalledTooltip: 'Install World Engine to change this',
+          startingTooltip: 'Wait for World Engine to finish starting',
+          failedTooltip: 'Fix World Engine to change this'
         },
         performance: {
           title: 'Performance Settings',

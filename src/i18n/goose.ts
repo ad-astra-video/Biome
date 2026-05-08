@@ -191,7 +191,9 @@ const goose = {
           reinstall: 'Re-hatch',
           fixInPlace: 'Preen In Place',
           totalReinstall: 'Full Molt',
-          installFirstTooltip: 'Hatch the World Engine to change this'
+          notInstalledTooltip: 'Hatch the World Engine to change this',
+          startingTooltip: 'Wait for the World Engine to finish hatching',
+          failedTooltip: 'Preen the World Engine to change this'
         },
         performance: {
           title: 'Performance Settings',
