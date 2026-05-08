@@ -36,9 +36,9 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from huggingface_hub import constants as hf_constants
-from huggingface_hub import get_collection
+from huggingface_hub import get_collection, scan_cache_dir
 from huggingface_hub import model_info as hf_model_info
 from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 from pydantic import BaseModel
@@ -101,14 +101,6 @@ class ModelInfoResponse(BaseModel):
     error: str | None
 
 
-class ModelAvailability(BaseModel):
-    """One entry in the `/api/model-availability` response. Mirrors the
-    `ModelAvailability` TS type in `src/types/ipc.ts`."""
-
-    id: str
-    is_local: bool
-
-
 # ============================================================================
 # Constants
 # ============================================================================
@@ -120,23 +112,6 @@ WAYPOINT_COLLECTION_SLUG = "Overworld/waypoint"
 # Fallback when the collection request fails (e.g. offline mode, HF outage).
 # Keeps the picker populated with at least the default option.
 DEFAULT_WORLD_ENGINE_MODEL = "Overworld/Waypoint-1.5-1B"
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
-def _is_model_cached_in_hf_hub(repo_id: str, hub_dir: Path) -> bool:
-    """Walk the HF hub cache layout — `models--<owner>--<name>/snapshots/<sha>/`
-    — to check whether a given repo has any cached snapshot. Returns False
-    on any missing directory; never raises."""
-    model_dir_name = f"models--{repo_id.replace('/', '--')}"
-    model_dir = hub_dir / model_dir_name
-    snapshots_dir = model_dir / "snapshots"
-    if not snapshots_dir.is_dir():
-        return False
-    return any(snapshots_dir.iterdir())
 
 
 # ============================================================================
@@ -290,31 +265,27 @@ async def list_waypoint_models(
     return result
 
 
-@router.get("/api/model-availability")
-async def list_model_availability(
-    ids: Annotated[list[str], Query()] = [],  # noqa: B006  -- FastAPI requires a default for Query params; the empty list is read-only here
-) -> list[ModelAvailability]:
-    """Report local-cache presence for each requested model ID.
+@router.get("/api/cached-models")
+async def list_cached_models() -> list[str]:
+    """List the model IDs currently resident in the local HF hub cache.
 
-    Order matches the input; duplicates and empty entries are dropped.
-    Returns an empty list for an empty input — the renderer batches IDs
-    into a single request and renders nothing useful from a no-op."""
-    seen: set[str] = set()
-    deduped: list[str] = []
-    for raw in ids:
-        cleaned = raw.strip()
-        if cleaned and cleaned not in seen:
-            seen.add(cleaned)
-            deduped.append(cleaned)
+    Used by the renderer's world-model picker to mark which options are
+    downloaded — the server is the canonical owner of cache state, so all
+    cache management (query, delete) routes through here rather than the
+    renderer walking the filesystem itself.
 
-    if not deduped:
-        return []
+    Defers to `huggingface_hub.scan_cache_dir` for the parse so we get
+    the proper `models--<owner>--<name>` → `<owner>/<name>` reverse
+    mapping and skip non-model repo types (datasets, spaces) that
+    coexist in the same cache root."""
 
-    def _scan() -> list[ModelAvailability]:
-        hub_dir = Path(hf_constants.HF_HUB_CACHE)
-        if not hub_dir.is_dir():
-            return [ModelAvailability(id=id_, is_local=False) for id_ in deduped]
-        return [ModelAvailability(id=id_, is_local=_is_model_cached_in_hf_hub(id_, hub_dir)) for id_ in deduped]
+    def _scan() -> list[str]:
+        try:
+            info = scan_cache_dir()
+        except Exception as e:  # noqa: BLE001  -- scan_cache_dir raises a wide grab-bag (CacheNotFound, OSError); soft-fall to empty
+            logger.warning(f"scan_cache_dir failed: {e}")
+            return []
+        return [repo.repo_id for repo in info.repos if repo.repo_type == "model"]
 
     return await asyncio.to_thread(_scan)
 

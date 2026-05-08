@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getServerState } from '../lib/serverState.js'
-import type { ModelAvailability, ModelInfo } from '../../src/types/ipc.js'
+import type { ModelInfo } from '../../src/types/ipc.js'
 
 // Returned when no server is reachable to satisfy a metadata request.
 // Keeps the picker populated with at least one option so the UI never
@@ -66,18 +66,12 @@ export function registerModelsIpc(): void {
     return (await response.json()) as string[]
   })
 
-  ipcMain.handle('list-model-availability', async (_event, modelIds: string[], serverUrl?: string) => {
-    const deduped = dedupeIds(modelIds)
-    if (deduped.length === 0) return []
-
+  ipcMain.handle('list-cached-models', async (_event, serverUrl?: string) => {
     const url = resolveServerUrl(serverUrl)
-    if (!url) return deduped.map((id) => ({ id, is_local: false }))
-
-    const params = new URLSearchParams()
-    for (const id of deduped) params.append('ids', id)
-    const response = await fetchWithTimeout(`${url}/api/model-availability?${params.toString()}`)
-    if (!response?.ok) return deduped.map((id) => ({ id, is_local: false }))
-    return (await response.json()) as ModelAvailability[]
+    if (!url) return []
+    const response = await fetchWithTimeout(`${url}/api/cached-models`)
+    if (!response?.ok) return []
+    return (await response.json()) as string[]
   })
 
   ipcMain.handle('get-models-info', async (_event, modelIds: string[], serverUrl?: string) => {

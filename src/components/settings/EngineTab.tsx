@@ -218,18 +218,18 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           .map((id) => id.trim())
           .filter((id) => id.length > 0)
 
-        const [availability, modelsInfo] = await Promise.all([
-          invoke('list-model-availability', ids, serverUrlForModels),
+        const [cachedIds, modelsInfo] = await Promise.all([
+          invoke('list-cached-models', serverUrlForModels),
           invoke('get-models-info', ids, serverUrlForModels)
         ])
         if (cancelled) return
 
-        const availabilityMap = new Map((availability || []).map((entry) => [entry.id, !!entry.is_local]))
+        const cachedSet = new Set(cachedIds || [])
         const infoMap = new Map((modelsInfo || []).map((entry) => [entry.id, entry]))
         setMenuModelOptions(
           ids.map((id) => ({
             id,
-            isLocal: availabilityMap.get(id) ?? false,
+            isLocal: cachedSet.has(id),
             sizeBytes: infoMap.get(id)?.size_bytes ?? null
           }))
         )

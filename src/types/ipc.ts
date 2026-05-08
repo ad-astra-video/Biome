@@ -2,11 +2,6 @@ import type { EngineStatus, SeedFileRecord, SeedSource } from './app'
 import type { Settings } from './settings'
 import type { PortalSparksTuning } from '../lib/portalSparksTuning'
 
-export type ModelAvailability = {
-  id: string
-  is_local: boolean
-}
-
 export type ModelInfo = {
   id: string
   size_bytes: number | null
@@ -267,7 +262,7 @@ export type IpcCommandMap = {
   // is passed). The renderer passes its configured server URL in
   // server-mode and lets the handler resolve to localhost in standalone.
   'list-waypoint-models': { args: [serverUrl?: string]; return: string[] }
-  'list-model-availability': { args: [modelIds: string[], serverUrl?: string]; return: ModelAvailability[] }
+  'list-cached-models': { args: [serverUrl?: string]; return: string[] }
   'get-models-info': { args: [modelIds: string[], serverUrl?: string]; return: ModelInfo[] }
   'delete-cached-model': { args: [modelId: string, serverUrl?: string]; return: void }
 
