@@ -41,8 +41,10 @@ export type StartupContextValue = {
    *  Used by the WorldEngineSection install/reinstall buttons and as
    *  the recovery path from `not_installed` / `failed`. The state moves
    *  through `preparing` for the duration and lands on `ready` (success)
-   *  or `failed` (install or start broke). */
-  reinstallEngine: (mode?: 'fix' | 'nuke') => Promise<void>
+   *  or `failed` (install or start broke). The resolved value is the
+   *  terminal state, so callers can branch on the outcome (e.g. close
+   *  the install-log modal on success, leave it open on failure). */
+  reinstallEngine: (mode?: 'fix' | 'nuke') => Promise<StartupState>
 }
 
 export const StartupContext = createContext<StartupContextValue | null>(null)

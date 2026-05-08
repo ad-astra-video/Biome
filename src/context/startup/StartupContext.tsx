@@ -123,7 +123,7 @@ export const StartupProvider = ({ children }: { children: ReactNode }) => {
     setState(await startServer())
   }, [isStandaloneMode])
 
-  const reinstallEngine = useCallback(async (mode: 'fix' | 'nuke' = 'fix'): Promise<void> => {
+  const reinstallEngine = useCallback(async (mode: 'fix' | 'nuke' = 'fix'): Promise<StartupState> => {
     setState({ kind: 'preparing' })
 
     // Stop the running server (if any) so the freshly-installed deps run
@@ -143,11 +143,14 @@ export const StartupProvider = ({ children }: { children: ReactNode }) => {
     } catch (e) {
       const msg = errorMessage(e)
       log.error(`${command} failed:`, msg)
-      setState({ kind: 'failed', error: msg })
-      return
+      const failed: StartupState = { kind: 'failed', error: msg }
+      setState(failed)
+      return failed
     }
 
-    setState(await startServer())
+    const final = await startServer()
+    setState(final)
+    return final
   }, [])
 
   useEffect(() => {

@@ -341,28 +341,31 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     serverUrlForModels
   ])
 
+  // `reinstallEngine` orchestrates stop → install → start as one unit; the
+  // returned terminal state lets us auto-close the install-log modal on
+  // success while leaving it open on `failed` so the user can read the
+  // crash output and decide whether to retry. Errors also surface through
+  // the engine-log IPC stream the modal already tails.
+  const runReinstallAndAutoClose = async (mode: 'fix' | 'nuke') => {
+    setShowLocalInstallLog(true)
+    const result = await startup.reinstallEngine(mode)
+    if (result.kind === 'ready') setShowLocalInstallLog(false)
+  }
+
   const handleConfirmFixEngine = async () => {
     setShowFixModal(false)
-    setShowLocalInstallLog(true)
-    // `reinstallEngine` orchestrates stop → install → start as one unit;
-    // any error surfaces via the StartupContext state (failed kind) and
-    // through the engine-log IPC stream the install modal already tails.
-    await startup.reinstallEngine('fix')
+    await runReinstallAndAutoClose('fix')
   }
 
   const handleConfirmNukeEngine = async () => {
     setShowNukeModal(false)
-    setShowLocalInstallLog(true)
-    await startup.reinstallEngine('nuke')
+    await runReinstallAndAutoClose('nuke')
   }
 
   // First-time install (and recovery from `failed`) goes through the same
   // pipeline; `reinstallEngine('fix')` is identical to a fresh install
   // when there's nothing to nuke.
-  const handleInstallEngine = async () => {
-    setShowLocalInstallLog(true)
-    await startup.reinstallEngine('fix')
-  }
+  const handleInstallEngine = () => runReinstallAndAutoClose('fix')
 
   return (
     <div className={active ? 'flex flex-col gap-[2.3cqh]' : 'hidden'}>
