@@ -262,11 +262,14 @@ export type IpcCommandMap = {
   'get-settings-path-str': { args: []; return: string }
   'open-settings': { args: []; return: void }
 
-  // Models
-  'list-waypoint-models': { args: []; return: string[] }
-  'list-model-availability': { args: [modelIds: string[]]; return: ModelAvailability[] }
+  // Models — every handler is a thin proxy to the WorldEngine server's
+  // HTTP routes (auto-resolves to the local managed process when no URL
+  // is passed). The renderer passes its configured server URL in
+  // server-mode and lets the handler resolve to localhost in standalone.
+  'list-waypoint-models': { args: [serverUrl?: string]; return: string[] }
+  'list-model-availability': { args: [modelIds: string[], serverUrl?: string]; return: ModelAvailability[] }
   'get-models-info': { args: [modelIds: string[], serverUrl?: string]; return: ModelInfo[] }
-  'delete-cached-model': { args: [modelId: string]; return: void }
+  'delete-cached-model': { args: [modelId: string, serverUrl?: string]; return: void }
 
   // Engine
   'check-engine-status': { args: [source?: string]; return: EngineStatus }

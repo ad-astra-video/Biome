@@ -194,7 +194,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       setMenuModelsLoading(true)
       setMenuModelsError(null)
       try {
-        const remoteModels = await invoke('list-waypoint-models')
+        const remoteModels = await invoke('list-waypoint-models', serverUrlForModels)
         if (cancelled) return
 
         const ids = [
@@ -204,7 +204,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           .filter((id) => id.length > 0)
 
         const [availability, modelsInfo] = await Promise.all([
-          invoke('list-model-availability', ids),
+          invoke('list-model-availability', ids, serverUrlForModels),
           invoke('get-models-info', ids, serverUrlForModels)
         ])
         if (cancelled) return
@@ -307,7 +307,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     if (!showDeleteCacheModal) return
     const modelId = showDeleteCacheModal
     setShowDeleteCacheModal(null)
-    await invoke('delete-cached-model', modelId)
+    await invoke('delete-cached-model', modelId, serverUrlForModels)
     if (savedCustomModels.includes(modelId)) {
       // Custom model: remove from cache AND from custom list
       const updated = savedCustomModels.filter((m) => m !== modelId)
@@ -321,7 +321,15 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       // Default model: just update local status
       setMenuModelOptions((prev) => prev.map((m) => (m.id === modelId ? { ...m, isLocal: false } : m)))
     }
-  }, [showDeleteCacheModal, savedCustomModels, settings, saveSettings, menuModelOptions, menuWorldModel])
+  }, [
+    showDeleteCacheModal,
+    savedCustomModels,
+    settings,
+    saveSettings,
+    menuModelOptions,
+    menuWorldModel,
+    serverUrlForModels
+  ])
 
   const handleConfirmFixEngine = async () => {
     setShowFixModal(false)
