@@ -4,6 +4,7 @@ import { invoke } from '../../bridge'
 import { buildDiagnosticsPayload } from '../../lib/diagnosticsPayload'
 import { useConnection } from '../../context/streaming/connection'
 import { useEngine } from '../../context/streaming/engine'
+import { useStartup } from '../../context/startup/startupContextValue'
 import { useEngineLogs } from '../../hooks/engine/useEngineLogs'
 import Button from '../ui/Button'
 import ServerLogDisplay from './ServerLogDisplay'
@@ -17,6 +18,14 @@ type EngineInstallModalProps = {
 const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
   const { t } = useTranslation()
   const { server } = useConnection()
+  // Install lifecycle is driven by StartupContext now (reinstallEngine
+  // orchestrates stop → install → start as one atomic state transition);
+  // engine.setup.abort is still the right path for the abort IPC since
+  // it targets the same Electron-side AbortController as the reinstall
+  // command StartupContext invokes.
+  const { state: startupState } = useStartup()
+  const installInProgress = startupState.kind === 'preparing'
+  const installError = startupState.kind === 'failed' ? startupState.error : null
   const setup = useEngine().setup
   const { logs: installLogs, clear: clearInstallLogs } = useEngineLogs(true)
   const [isExportingInstallDiagnostics, setIsExportingInstallDiagnostics] = useState(false)
@@ -24,27 +33,26 @@ const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
   const [installExportStatus, setInstallExportStatus] = useState<string | null>(null)
 
   useEffect(() => {
-    if (setup.inProgress) {
+    if (installInProgress) {
       clearInstallLogs()
       setInstallExportStatus(null)
     }
-  }, [setup.inProgress, clearInstallLogs])
+  }, [installInProgress, clearInstallLogs])
 
   const buildPayload = useCallback(
     () =>
       buildDiagnosticsPayload({
         server,
         error: {
-          message: setup.error,
-          stage: setup.progress,
-          in_progress: setup.inProgress
+          message: installError,
+          in_progress: installInProgress
         },
         // Install runs entirely on the Electron side — no WS connection
         // yet — so the Electron-process tail (pulled by the builder) is
         // the only log source.
         serverLogs: []
       }),
-    [server, setup.error, setup.inProgress, setup.progress]
+    [server, installError, installInProgress]
   )
 
   const handleExportInstallDiagnostics = async () => {
@@ -93,29 +101,29 @@ const EngineInstallModal = ({ onClose }: EngineInstallModalProps) => {
     >
       <FocusScope
         autoFocus
-        onCancel={setup.inProgress ? undefined : onClose}
+        onCancel={installInProgress ? undefined : onClose}
         className="pointer-events-auto w-[135.11cqh] max-w-[92vw]"
       >
         <ServerLogDisplay
           title="app.dialogs.install.title"
           logs={installLogs}
-          showProgress={setup.inProgress}
+          showProgress={installInProgress}
           progressMessage={
-            setup.inProgress
-              ? setup.progress || t('app.dialogs.install.installing')
-              : setup.error
+            installInProgress
+              ? t('app.dialogs.install.installing')
+              : installError
                 ? t('app.dialogs.install.failed')
                 : t('app.dialogs.install.complete')
           }
-          errorMessage={setup.error}
+          errorMessage={installError}
           buildDiagnosticsPayload={buildPayload}
-          showExportAction={!setup.inProgress && !!setup.error}
+          showExportAction={!installInProgress && !!installError}
           onExportAction={() => void handleExportInstallDiagnostics()}
           isExportingAction={isExportingInstallDiagnostics}
           exportActionLabel="app.buttons.saveReport"
           actionStatus={installExportStatus}
           headerAction={
-            setup.inProgress ? (
+            installInProgress ? (
               <div className="flex items-center gap-[0.8cqh]">
                 <Button
                   variant="secondary"
