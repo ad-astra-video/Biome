@@ -251,9 +251,21 @@ async def websocket_endpoint(
         engines: Engines | None = None
 
         try:
-            # Phase 1: wait for backend `_heavy_init` to finish (replay any
-            # accumulated stages, then stream live ones until done).
-            await startup.replay_to(conn)
+            # Phase 1: ensure engines are loaded (idempotent — first connect
+            # after process start does the heavy GPU-stack import + manager
+            # construction, subsequent connects find them already on
+            # `app.state.engines`). The init runs as a sibling task so
+            # `replay_to` can stream STARTUP_* stages out as they fire.
+            init_task = asyncio.create_task(startup.ensure_engines_loaded(websocket.app))
+            try:
+                await startup.replay_to(conn)
+            finally:
+                # `replay_to` only returns once `mark_done`/`mark_failed` fires,
+                # which happens at the end of the init body — so the task is
+                # already finished. The await is just for tidiness on the
+                # cancellation path.
+                if not init_task.done():
+                    await init_task
             if startup.error:
                 await conn.send_error(message_id=MessageId.SERVER_STARTUP_FAILED, message=str(startup.error))
                 return

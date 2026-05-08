@@ -1,9 +1,10 @@
 """
 Entry point and lifecycle for the Biome server.
 
-Owns the process boundary: instrumented heavy-import waterfall, env
-setup, parent-process watchdog, FastAPI lifespan + heavy init task,
-the FastAPI `app` instance + middleware, and the uvicorn boot. Endpoint
+Owns the process boundary: light-only startup imports, env setup,
+parent-process watchdog, FastAPI lifespan, the `app` instance +
+middleware, and the uvicorn boot. The heavy GPU stack is deferred to
+first WS connect via `ServerStartup.ensure_engines_loaded`. Endpoint
 definitions live in `server/routes.py`.
 """
 
@@ -19,7 +20,6 @@ from dataclasses import dataclass
 import structlog
 
 import util.server_logging  # noqa: F401  # pyright: ignore[reportUnusedImport]  -- side-effect: install TeeStream + crash hooks before any logging happens
-from server.protocol import StageId
 from util.hf_token import apply_resolved_token
 
 logger = structlog.stdlib.get_logger(__name__)
@@ -76,7 +76,14 @@ class ParentWatchdog:
 
 
 # ============================================================================
-# Heavy import waterfall (instrumented so each step is observable in the log)
+# Light import waterfall.
+#
+# Only imports needed to serve the info-only endpoints (`/health`,
+# `/api/model-info`, `/api/system-info`) and to bootstrap uvicorn live
+# here. The heavy GPU stack (world_engine, transformers, diffusers,
+# llama_cpp, torchvision, …) is deferred to first WS connect via
+# `ServerStartup.ensure_engines_loaded`, so the server can answer
+# metadata requests within seconds of launch even on cold cache.
 # ============================================================================
 
 try:
@@ -94,11 +101,6 @@ try:
 
     from util.system_info import SystemMonitor
 
-    logger.info("Importing torchvision...")
-    import torchvision
-
-    logger.info("torchvision imported", version=torchvision.__version__)
-
     logger.info("Importing FastAPI...")
     import uvicorn
     from fastapi import FastAPI
@@ -106,26 +108,15 @@ try:
 
     logger.info("FastAPI imported")
 
-    logger.info("Importing Engine Manager module...")
-    from engine import Engines
-    from engine.manager import WorldEngineManager
-
-    logger.info("Engine Manager module imported")
-
-    logger.info("Importing Safety module...")
-    from engine.safety import SafetyChecker
-
-    logger.info("Safety module imported")
-
 except Exception:
     logger.exception("Import failed")
     sys.exit(1)
 
 
 # Endpoints register onto an APIRouter in `server/routes.py`; importing it
-# now is safe because the heavy import waterfall above has already completed.
-# Importing earlier would pull the whole stack in via `server.routes`'s
-# transitive deps and break the instrumented load above.
+# is safe because the route module no longer transitively pulls the heavy
+# engine stack — handlers/workers defer their `world_engine` /
+# `engine.manager` imports to call-time.
 
 from server.routes import router  # noqa: E402
 from server.startup import ServerStartup  # noqa: E402
@@ -133,45 +124,6 @@ from server.startup import ServerStartup  # noqa: E402
 # ============================================================================
 # Application lifecycle
 # ============================================================================
-
-
-async def _heavy_init(app: FastAPI, startup: ServerStartup) -> None:
-    """Run heavy startup work (engine + safety warmup) in background so
-    /health responds immediately while the GPU stack initialises. Populates
-    `app.state.engines` on success."""
-    try:
-        startup.mark_stage(StageId.STARTUP_BEGIN)
-
-        logger.info("Initializing WorldEngine...")
-        startup.mark_stage(StageId.STARTUP_ENGINE_MANAGER)
-        world_engine = WorldEngineManager()
-
-        from engine.scene_authoring import SceneAuthoringManager
-
-        scene_authoring = SceneAuthoringManager(world_engine)
-
-        logger.info("Initializing Safety Checker...")
-        startup.mark_stage(StageId.STARTUP_SAFETY_CHECKER)
-        safety_checker = await asyncio.to_thread(SafetyChecker)
-        startup.mark_stage(StageId.STARTUP_SAFETY_READY)
-
-        app.state.engines = Engines(
-            world_engine=world_engine,
-            scene_authoring=scene_authoring,
-            safety_checker=safety_checker,
-        )
-
-        logger.info(
-            "Ready: safety loaded, WorldEngine will load on first client",
-            safety_cache_entries=safety_checker.cache_size,
-        )
-        startup.mark_stage(StageId.STARTUP_READY)
-
-        startup.mark_done()
-
-    except Exception as exc:
-        logger.exception("Startup failed")
-        startup.mark_failed(str(exc))
 
 
 @asynccontextmanager
@@ -192,9 +144,6 @@ async def lifespan(app: FastAPI):
     # fine because each session clears its slot on teardown.
     app.state.active_session = None
 
-    # Heavy init runs in background so /health responds immediately.
-    init_task = asyncio.create_task(_heavy_init(app, startup))
-
     cfg: StartupConfig = app.state.startup_config
     watchdog_task = None
     if cfg.parent_pid is not None:
@@ -204,8 +153,6 @@ async def lifespan(app: FastAPI):
 
     if watchdog_task is not None:
         watchdog_task.cancel()
-    if not init_task.done():
-        init_task.cancel()
 
     logger.info("Shutting down")
 
