@@ -53,11 +53,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     getLastServerExitTail,
     serverLogPath,
     setupEngine,
-    nukeAndReinstallEngine,
-    abortEngineInstall,
-    setupProgress,
-    isLoading: engineSetupInProgress,
-    error: engineSetupError
+    abortEngineInstall
   } = useEngineApi()
   const {
     status: connectionStatus,
@@ -340,27 +336,11 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       serverLogPath,
       check: checkEngineStatus,
       setup: {
-        inProgress: engineSetupInProgress,
-        progress: setupProgress,
-        error: engineSetupError,
         run: setupEngine,
-        nukeAndReinstall: nukeAndReinstallEngine,
         abort: abortEngineInstall
       }
     }),
-    [
-      engineStatus,
-      engineReady,
-      isServerRunning,
-      serverLogPath,
-      checkEngineStatus,
-      engineSetupInProgress,
-      setupProgress,
-      engineSetupError,
-      setupEngine,
-      nukeAndReinstallEngine,
-      abortEngineInstall
-    ]
+    [engineStatus, engineReady, isServerRunning, serverLogPath, checkEngineStatus, setupEngine, abortEngineInstall]
   )
 
   const seedsValue = useMemo<SeedsContextValue>(

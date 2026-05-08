@@ -5,13 +5,8 @@ import type { StageId } from '../../stages'
 
 export type UseEngineResult = {
   status: EngineStatus | null
-  isLoading: boolean
-  error: string | null
-  setupProgress: string | null
-  serverStarting: boolean
   checkStatus: () => Promise<EngineStatus | null>
   setupEngine: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
-  nukeAndReinstallEngine: (onStage?: (stageId: StageId) => void) => Promise<EngineStatus>
   abortEngineInstall: () => Promise<string>
   startServer: (port: number) => Promise<string>
   stopServer: () => Promise<string>
@@ -28,10 +23,6 @@ export type UseEngineResult = {
 
 export const useEngineApi = (): UseEngineResult => {
   const [status, setStatus] = useState<EngineStatus | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [setupProgress, setSetupProgress] = useState<string | null>(null)
-  const [serverStarting, setServerStarting] = useState(false)
   // `checkServerRunning` polls during warm-connection and needs to refresh
   // the full engine status on the running-state transition.  Track the
   // previous `is-server-running` result via a ref rather than via React
@@ -43,94 +34,39 @@ export const useEngineApi = (): UseEngineResult => {
 
   const checkStatus = useCallback(async () => {
     try {
-      setError(null)
       const engineStatus = await invoke('check-engine-status', 'useEngineApi.checkStatus')
       setStatus(engineStatus)
       return engineStatus
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+    } catch {
       return null
     }
   }, [])
 
-  const runEngineInstall = useCallback(
-    async (command: 'reinstall-engine' | 'nuke-and-reinstall-engine', onStage?: (stageId: StageId) => void) => {
-      try {
-        setIsLoading(true)
-        setError(null)
-        setSetupProgress('Installing...')
-        onStage?.('setup.sync_deps')
-
-        await invoke(command)
-
-        setSetupProgress('Verifying setup...')
-        onStage?.('setup.verify')
-        const finalStatus = await invoke('check-engine-status', 'useEngineApi.runEngineInstall.post')
-        setStatus(finalStatus)
-
-        setSetupProgress(null)
-        return finalStatus
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-        setSetupProgress(null)
-        throw err
-      } finally {
-        setIsLoading(false)
-      }
-    },
-    []
-  )
-
-  const setupEngine = useCallback(
-    async (onStage?: (stageId: StageId) => void) => {
-      return runEngineInstall('reinstall-engine', onStage)
-    },
-    [runEngineInstall]
-  )
-
-  const nukeAndReinstallEngine = useCallback(
-    async (onStage?: (stageId: StageId) => void) => {
-      return runEngineInstall('nuke-and-reinstall-engine', onStage)
-    },
-    [runEngineInstall]
-  )
+  const setupEngine = useCallback(async (onStage?: (stageId: StageId) => void) => {
+    onStage?.('setup.sync_deps')
+    await invoke('reinstall-engine')
+    onStage?.('setup.verify')
+    const finalStatus = await invoke('check-engine-status', 'useEngineApi.setupEngine.post')
+    setStatus(finalStatus)
+    return finalStatus
+  }, [])
 
   const abortEngineInstall = useCallback(async () => {
-    try {
-      return await invoke('abort-engine-install')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      throw err
-    }
+    return await invoke('abort-engine-install')
   }, [])
 
   const startServer = useCallback(async (port: number) => {
-    try {
-      setServerStarting(true)
-      setError(null)
-      const result = await invoke('start-engine-server', port)
-      const newStatus = await invoke('check-engine-status', 'useEngineApi.startServer.post')
-      setStatus(newStatus)
-      return result
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      throw err
-    } finally {
-      setServerStarting(false)
-    }
+    const result = await invoke('start-engine-server', port)
+    const newStatus = await invoke('check-engine-status', 'useEngineApi.startServer.post')
+    setStatus(newStatus)
+    return result
   }, [])
 
   const stopServer = useCallback(async () => {
-    try {
-      setError(null)
-      const result = await invoke('stop-engine-server')
-      const newStatus = await invoke('check-engine-status', 'useEngineApi.stopServer.post')
-      setStatus(newStatus)
-      return result
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      throw err
-    }
+    const result = await invoke('stop-engine-server')
+    const newStatus = await invoke('check-engine-status', 'useEngineApi.stopServer.post')
+    setStatus(newStatus)
+    return result
   }, [])
 
   const checkServerRunning = useCallback(async () => {
@@ -185,13 +121,8 @@ export const useEngineApi = (): UseEngineResult => {
 
   return {
     status,
-    isLoading,
-    error,
-    setupProgress,
-    serverStarting,
     checkStatus,
     setupEngine,
-    nukeAndReinstallEngine,
     abortEngineInstall,
     startServer,
     stopServer,
