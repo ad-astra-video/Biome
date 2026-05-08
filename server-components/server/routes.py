@@ -31,17 +31,21 @@ take only what they need rather than reaching through a god object.
 import asyncio
 import contextlib
 import os
+import shutil
+from pathlib import Path
 from typing import Annotated, Literal
 
 import structlog
-from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from huggingface_hub import constants as hf_constants
+from huggingface_hub import get_collection
 from huggingface_hub import model_info as hf_model_info
 from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 from pydantic import BaseModel
 from structlog.contextvars import bound_contextvars
 
 from engine import Engines
-from server.protocol import PROTOCOL_VERSION, MessageId, StageId, SystemInfoMessage, rpc_ok
+from server.protocol import PROTOCOL_VERSION, MessageId, StageId, SystemInfo, SystemInfoMessage, rpc_ok
 from server.session.connection import Connection
 from server.session.handlers import build_init_response_data, prepare_session, run_preinit_handshake
 from server.session.workers import run_session
@@ -88,6 +92,44 @@ class ModelInfoResponse(BaseModel):
     size_bytes: int | None
     exists: bool
     error: str | None
+
+
+class ModelAvailability(BaseModel):
+    """One entry in the `/api/model-availability` response. Mirrors the
+    `ModelAvailability` TS type in `src/types/ipc.ts`."""
+
+    id: str
+    is_local: bool
+
+
+# ============================================================================
+# Constants
+# ============================================================================
+
+# Slug of the curated HuggingFace collection that backs the world-model
+# picker. Mirrored on the renderer side; bump on both ends together.
+WAYPOINT_COLLECTION_SLUG = "Overworld/waypoint"
+
+# Fallback when the collection request fails (e.g. offline mode, HF outage).
+# Keeps the picker populated with at least the default option.
+DEFAULT_WORLD_ENGINE_MODEL = "Overworld/Waypoint-1.5-1B"
+
+
+# ============================================================================
+# Helpers
+# ============================================================================
+
+
+def _is_model_cached_in_hf_hub(repo_id: str, hub_dir: Path) -> bool:
+    """Walk the HF hub cache layout — `models--<owner>--<name>/snapshots/<sha>/`
+    — to check whether a given repo has any cached snapshot. Returns False
+    on any missing directory; never raises."""
+    model_dir_name = f"models--{repo_id.replace('/', '--')}"
+    model_dir = hub_dir / model_dir_name
+    snapshots_dir = model_dir / "snapshots"
+    if not snapshots_dir.is_dir():
+        return False
+    return any(snapshots_dir.iterdir())
 
 
 # ============================================================================
@@ -175,6 +217,86 @@ async def get_model_info(model_id: str) -> ModelInfoResponse:
     except Exception as e:  # noqa: BLE001  # pyright: ignore[reportUnusedExcept]  -- HF client raises a wide grab-bag (HTTPError/RequestException/HfHubHTTPError) that pyright's stubs don't model; fold them all into a soft response
         logger.warning(f"model-info error for {model_id}: {e}")
         return ModelInfoResponse(id=model_id, size_bytes=None, exists=True, error="Could not check model")
+
+
+@router.get("/api/waypoint-models")
+async def list_waypoint_models() -> list[str]:
+    """List model IDs from the Overworld Waypoint collection on HuggingFace.
+
+    Used by the renderer to populate the world-model picker. Falls back
+    to the default model alone if the collection request fails (e.g.
+    offline mode, HF outage), so the picker is never empty."""
+
+    def _fetch() -> list[str]:
+        try:
+            collection = get_collection(WAYPOINT_COLLECTION_SLUG)
+        except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall to the default
+            logger.warning(f"waypoint-models fetch failed: {e}")
+            return [DEFAULT_WORLD_ENGINE_MODEL]
+
+        models = [item.item_id for item in collection.items if item.item_type == "model"]
+        return models or [DEFAULT_WORLD_ENGINE_MODEL]
+
+    return await asyncio.to_thread(_fetch)
+
+
+@router.get("/api/model-availability")
+async def list_model_availability(
+    ids: Annotated[list[str], Query()] = [],  # noqa: B006  -- FastAPI requires a default for Query params; the empty list is read-only here
+) -> list[ModelAvailability]:
+    """Report local-cache presence for each requested model ID.
+
+    Order matches the input; duplicates and empty entries are dropped.
+    Returns an empty list for an empty input — the renderer batches IDs
+    into a single request and renders nothing useful from a no-op."""
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for raw in ids:
+        cleaned = raw.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            deduped.append(cleaned)
+
+    if not deduped:
+        return []
+
+    def _scan() -> list[ModelAvailability]:
+        hub_dir = Path(hf_constants.HF_HUB_CACHE)
+        if not hub_dir.is_dir():
+            return [ModelAvailability(id=id_, is_local=False) for id_ in deduped]
+        return [ModelAvailability(id=id_, is_local=_is_model_cached_in_hf_hub(id_, hub_dir)) for id_ in deduped]
+
+    return await asyncio.to_thread(_scan)
+
+
+@router.delete("/api/cached-model/{model_id:path}", status_code=204)
+async def delete_cached_model(model_id: str) -> None:
+    """Remove a model from the local HF hub cache. No-op if not present.
+
+    The HF hub cache layout uses symlinks inside `snapshots/` that point
+    to `../blobs/`; removing the whole `models--<repo>` directory drops
+    blobs + snapshots + refs together, which is safe because each model
+    occupies an isolated directory."""
+
+    def _delete() -> None:
+        hub_dir = Path(hf_constants.HF_HUB_CACHE)
+        model_dir = hub_dir / f"models--{model_id.replace('/', '--')}"
+        if model_dir.exists():
+            shutil.rmtree(model_dir)
+
+    await asyncio.to_thread(_delete)
+
+
+@router.get("/api/system-info")
+async def get_system_info(request: Request) -> SystemInfo:
+    """Static hardware identity captured once at process startup.
+
+    Same shape as the `SystemInfoMessage` push the WS endpoint emits
+    after handshake — exposed over HTTP so the renderer can read it
+    pre-WS (for the device-info panel and quantisation gating) without
+    needing a live session."""
+    monitor: SystemMonitor = request.app.state.system_monitor
+    return monitor.info
 
 
 # ============================================================================
