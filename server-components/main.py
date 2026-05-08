@@ -118,8 +118,20 @@ except Exception:
 # engine stack — handlers/workers defer their `world_engine` /
 # `engine.manager` imports to call-time.
 
-from server.routes import router  # noqa: E402
+from server.caches import TtlCache  # noqa: E402
+from server.routes import (  # noqa: E402
+    ModelInfoResponse,
+    router,
+)
 from server.startup import ServerStartup  # noqa: E402
+
+# Cached HuggingFace metadata is stable for minutes at a time — the
+# Waypoint collection and per-model file lists rarely change between
+# settings-panel renders. 5 min is short enough that a freshly-uploaded
+# model shows up the next time the user opens the picker, long enough
+# that opening + closing settings repeatedly doesn't produce a burst of
+# upstream HF traffic.
+HF_METADATA_TTL_SECONDS = 5 * 60
 
 # ============================================================================
 # Application lifecycle
@@ -134,6 +146,8 @@ async def lifespan(app: FastAPI):
     startup = ServerStartup()
     app.state.startup = startup
     app.state.system_monitor = SystemMonitor.collect()
+    app.state.model_info_cache = TtlCache[str, ModelInfoResponse](ttl_seconds=HF_METADATA_TTL_SECONDS)
+    app.state.waypoint_models_cache = TtlCache[str, list[str]](ttl_seconds=HF_METADATA_TTL_SECONDS)
     # Single-session gate. The WS endpoint claims this slot on accept and
     # clears it on teardown; concurrent handshakes from a second client
     # are rejected with `MessageId.SERVER_BUSY`. The shared `WorldEngine`

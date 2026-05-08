@@ -45,6 +45,7 @@ from pydantic import BaseModel
 from structlog.contextvars import bound_contextvars
 
 from engine import Engines
+from server.caches import TtlCache
 from server.protocol import PROTOCOL_VERSION, MessageId, StageId, SystemInfo, SystemInfoMessage, rpc_ok
 from server.session.connection import Connection
 from server.session.handlers import build_init_response_data, prepare_session, run_preinit_handshake
@@ -162,6 +163,16 @@ def get_system_monitor_ws(websocket: WebSocket) -> SystemMonitor:
     return monitor
 
 
+def get_model_info_cache(request: Request) -> TtlCache[str, "ModelInfoResponse"]:
+    cache: TtlCache[str, ModelInfoResponse] = request.app.state.model_info_cache
+    return cache
+
+
+def get_waypoint_models_cache(request: Request) -> TtlCache[str, list[str]]:
+    cache: TtlCache[str, list[str]] = request.app.state.waypoint_models_cache
+    return cache
+
+
 # ============================================================================
 # HTTP Endpoints
 # ============================================================================
@@ -185,8 +196,20 @@ async def health(request: Request, startup: Annotated[ServerStartup, Depends(get
 
 
 @router.get("/api/model-info/{model_id:path}")
-async def get_model_info(model_id: str) -> ModelInfoResponse:
-    """Fetch model metadata from HuggingFace Hub."""
+async def get_model_info(
+    model_id: str,
+    cache: Annotated[TtlCache[str, ModelInfoResponse], Depends(get_model_info_cache)],
+) -> ModelInfoResponse:
+    """Fetch model metadata from HuggingFace Hub.
+
+    Cached per model id with the standard HF-metadata TTL so a settings
+    panel that lists 5-10 models doesn't re-resolve each one on every
+    open. Transient errors aren't cached — those should retry — but
+    stable error states (gated repo, not found) are, since they'll keep
+    returning the same response and burning HF requests is wasteful."""
+    cached = cache.get(model_id)
+    if cached is not None:
+        return cached
 
     def _fetch() -> ModelInfoResponse:
         info = hf_model_info(model_id, files_metadata=True)
@@ -209,35 +232,53 @@ async def get_model_info(model_id: str) -> ModelInfoResponse:
         return ModelInfoResponse(id=model_id, size_bytes=size_bytes, exists=True, error=None)
 
     try:
-        return await asyncio.to_thread(_fetch)
+        result = await asyncio.to_thread(_fetch)
     except GatedRepoError:
-        return ModelInfoResponse(id=model_id, size_bytes=None, exists=True, error="Private or gated model")
+        result = ModelInfoResponse(id=model_id, size_bytes=None, exists=True, error="Private or gated model")
     except RepositoryNotFoundError:
-        return ModelInfoResponse(id=model_id, size_bytes=None, exists=False, error="Model not found")
+        result = ModelInfoResponse(id=model_id, size_bytes=None, exists=False, error="Model not found")
     except Exception as e:  # noqa: BLE001  # pyright: ignore[reportUnusedExcept]  -- HF client raises a wide grab-bag (HTTPError/RequestException/HfHubHTTPError) that pyright's stubs don't model; fold them all into a soft response
         logger.warning(f"model-info error for {model_id}: {e}")
+        # Transient — return without caching so the next call retries.
         return ModelInfoResponse(id=model_id, size_bytes=None, exists=True, error="Could not check model")
+
+    cache.set(model_id, result)
+    return result
 
 
 @router.get("/api/waypoint-models")
-async def list_waypoint_models() -> list[str]:
+async def list_waypoint_models(
+    cache: Annotated[TtlCache[str, list[str]], Depends(get_waypoint_models_cache)],
+) -> list[str]:
     """List model IDs from the Overworld Waypoint collection on HuggingFace.
 
     Used by the renderer to populate the world-model picker. Falls back
     to the default model alone if the collection request fails (e.g.
-    offline mode, HF outage), so the picker is never empty."""
+    offline mode, HF outage), so the picker is never empty.
 
-    def _fetch() -> list[str]:
+    Cached against the collection slug so repeated picker opens reuse the
+    last successful resolution. Failures aren't cached (the soft-fall
+    response would freeze the picker at the default for the TTL even
+    after HF recovers)."""
+    cached = cache.get(WAYPOINT_COLLECTION_SLUG)
+    if cached is not None:
+        return cached
+
+    def _fetch() -> list[str] | None:
         try:
             collection = get_collection(WAYPOINT_COLLECTION_SLUG)
         except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall to the default
             logger.warning(f"waypoint-models fetch failed: {e}")
-            return [DEFAULT_WORLD_ENGINE_MODEL]
+            return None
 
-        models = [item.item_id for item in collection.items if item.item_type == "model"]
-        return models or [DEFAULT_WORLD_ENGINE_MODEL]
+        return [item.item_id for item in collection.items if item.item_type == "model"]
 
-    return await asyncio.to_thread(_fetch)
+    fetched = await asyncio.to_thread(_fetch)
+    if fetched is None:
+        return [DEFAULT_WORLD_ENGINE_MODEL]
+    result = fetched or [DEFAULT_WORLD_ENGINE_MODEL]
+    cache.set(WAYPOINT_COLLECTION_SLUG, result)
+    return result
 
 
 @router.get("/api/model-availability")
