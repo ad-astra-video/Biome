@@ -96,7 +96,11 @@ const SettingsSelect = ({
       "
     >
       {options
-        .filter((option) => !hideSelectedInDropdown || option.value !== value)
+        // Hide the selected option from the dropdown when there's at least
+        // one alternative — collapsing to zero rows would leave the menu
+        // visually empty in the (unusual but reachable) case where the
+        // picker is showing exactly one entry, the currently-selected one.
+        .filter((option, _, all) => !hideSelectedInDropdown || all.length === 1 || option.value !== value)
         .map((option) => (
           <div
             key={option.value}
