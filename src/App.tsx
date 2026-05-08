@@ -378,6 +378,11 @@ const AppShell = () => {
             </div>
           </div>
         )}
+        {/* ViewLabel is lifted out of the menu home AnimatePresence so it
+         *  also renders during the startup splash — the splash's bottom-right
+         *  caption is laid out to baseline-align with this wordmark, and we
+         *  don't want a "Biome" pop-in when the menu mounts. */}
+        {(isStartupBlocked || showMenuHome) && <ViewLabel>{t('app.name')}</ViewLabel>}
         <AnimatePresence mode="wait">
           {activeMenuView === MENU_VIEW.HOME && (
             <motion.div
@@ -389,8 +394,6 @@ const AppShell = () => {
               exit="exit"
             >
               <SocialCtaRow />
-
-              <ViewLabel>{t('app.name')}</ViewLabel>
 
               <MenuButton
                 variant="secondary"

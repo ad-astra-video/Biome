@@ -2,29 +2,24 @@ import { useTranslation } from 'react-i18next'
 
 /** Splash overlay shown during the local-server boot pipeline.
  *
- *  Subdued by design: same background slideshow the menu uses (mounted
- *  by AppShell, plays continuously underneath), wordmark + caption
- *  centred, no portal / vortex / launch button. The vortex is the
- *  central loading motif for in-session loads — using it here would
- *  blur the distinction between "starting the app" and "loading a
- *  scene". When startup completes, this layer fades out and the
- *  portal fades in; the slideshow keeps playing across the handoff.
- *
- *  `pointer-events-auto` blocks clicks on the menu chrome that's
- *  hiding behind us — without it, the still-mounted (but suppressed)
- *  portal could swallow a stray click before the splash dismisses. */
+ *  "Starting World Engine…" sits in the bottom-right, baseline-aligned
+ *  with where the Biome wordmark will sit at bottom-left once the menu
+ *  mounts. The two never share the screen — this caption unmounts the
+ *  same render the menu's ViewLabel mounts — but the matching baseline
+ *  keeps the bottom edge of the screen feeling intentional across the
+ *  handoff. The portal's spawn-in animation takes the centre. */
 const StartupLoader = () => {
   const { t } = useTranslation()
   return (
-    <div
-      className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex flex-col items-center gap-[1.4cqh]">
-        <h1 className="m-0 font-serif text-heading leading-[0.95] text-text-primary">{t('app.name')}</h1>
-        <p className="m-0 font-mono text-[2cqh] tracking-tight text-text-muted">{t('app.startup.startingEngine')}</p>
-      </div>
+    <div className="pointer-events-auto absolute inset-0 z-30" role="status" aria-live="polite">
+      <p
+        className="
+          absolute right-(--edge-right) bottom-(--edge-bottom) m-0 font-serif text-[4cqh] leading-[0.8] font-normal
+          text-text-primary [text-shadow:0_0.14cqh_0.83cqh_rgba(0,0,0,0.5)]
+        "
+      >
+        {t('app.startup.startingEngine')}
+      </p>
     </div>
   )
 }
