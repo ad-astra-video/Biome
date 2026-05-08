@@ -1,9 +1,8 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '../../bridge'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { ENGINE_MODES, QUANT_OPTIONS, type QuantOption, type Settings } from '../../types/settings'
-import { useSettings } from '../../hooks/settings/settingsContextValue'
 import { useEngineLifecycle } from '../../context/engineLifecycle/engineLifecycleContextValue'
 import { normalizeServerUrl, toHealthUrl } from '../../utils/serverUrl'
 import SettingsSection from '../ui/SettingsSection'
@@ -18,7 +17,7 @@ import EngineInstallModal from '../engine/EngineInstallModal'
 
 type MenuModelOption = {
   id: string
-  isLocal: boolean | null
+  isLocal: boolean
   sizeBytes: number | null
 }
 
@@ -59,7 +58,6 @@ type EngineTabProps = {
 const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const { settings, active, menuEngineMode, setMenuEngineMode } = props
   const { t } = useTranslation()
-  const { saveSettings } = useSettings()
   const lifecycle = useEngineLifecycle()
   const checkEngine = lifecycle.check
   const engineReady = lifecycle.state.kind === 'ready'
@@ -67,7 +65,6 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const configEngineMode = settings.engine_mode
   const configWorldModel = settings.engine_model
   const configServerUrl = settings.server_url
-  const savedCustomModels = useMemo(() => settings.custom_models ?? [], [settings.custom_models])
 
   const [menuServerUrl, setMenuServerUrl] = useState(configServerUrl)
   const [menuWorldModel, setMenuWorldModel] = useState(configWorldModel)
@@ -79,10 +76,6 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   ])
   const [menuModelsLoading, setMenuModelsLoading] = useState(false)
   const [menuModelsError, setMenuModelsError] = useState<string | null>(null)
-  const [customModelStatus, setCustomModelStatus] = useState<{
-    state: 'idle' | 'loading' | 'error'
-    error: string | null
-  }>({ state: 'idle', error: null })
 
   const [serverUrlStatus, setServerUrlStatus] = useState<ServerUrlStatus>('idle')
   const [lastValidatedServerUrl, setLastValidatedServerUrl] = useState('')
@@ -209,30 +202,24 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       setMenuModelsLoading(true)
       setMenuModelsError(null)
       try {
-        const remoteModels = await invoke('list-waypoint-models', serverUrlForModels)
+        const models = await invoke('list-models', serverUrlForModels)
         if (cancelled) return
 
-        const ids = [
-          ...new Set([menuWorldModel, ...(Array.isArray(remoteModels) ? remoteModels : []), ...savedCustomModels])
-        ]
-          .map((id) => id.trim())
-          .filter((id) => id.length > 0)
-
-        const [cachedIds, modelsInfo] = await Promise.all([
-          invoke('list-cached-models', serverUrlForModels),
-          invoke('get-models-info', ids, serverUrlForModels)
-        ])
-        if (cancelled) return
-
-        const cachedSet = new Set(cachedIds || [])
-        const infoMap = new Map((modelsInfo || []).map((entry) => [entry.id, entry]))
-        setMenuModelOptions(
-          ids.map((id) => ({
-            id,
-            isLocal: cachedSet.has(id),
-            sizeBytes: infoMap.get(id)?.size_bytes ?? null
-          }))
-        )
+        // Pin the currently-selected model into the list even if the
+        // server doesn't report it (e.g. user has a stale config from
+        // before the model was retired from the Waypoint collection and
+        // they've since cleared their cache). Without this the picker
+        // would render with no selected option.
+        const haveSelected = models.some((m) => m.id === menuWorldModel)
+        const options: MenuModelOption[] = models.map((m) => ({
+          id: m.id,
+          isLocal: m.is_local,
+          sizeBytes: m.size_bytes
+        }))
+        if (!haveSelected && menuWorldModel.trim()) {
+          options.unshift({ id: menuWorldModel, isLocal: false, sizeBytes: null })
+        }
+        setMenuModelOptions(options)
       } catch {
         if (cancelled) return
         setMenuModelsError(t('app.settings.worldModel.couldNotLoadModelList'))
@@ -248,7 +235,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     return () => {
       cancelled = true
     }
-  }, [menuWorldModel, menuEngineMode, serverUrlForModels, serverUrlStatus, savedCustomModels, t, engineReady])
+  }, [menuWorldModel, menuEngineMode, serverUrlForModels, serverUrlStatus, t, engineReady])
 
   const handleEngineModeChange = (mode: 'server' | 'standalone') => {
     setMenuEngineMode(mode)
@@ -258,7 +245,6 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
   const handleWorldModelChange = (model: string) => {
     setMenuWorldModel(model.trim())
-    setCustomModelStatus({ state: 'idle', error: null })
   }
 
   const handleServerUrlBlur = useCallback(async () => {
@@ -296,58 +282,15 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     }
   }, [menuServerUrl, lastValidatedServerUrl, serverUrlStatus])
 
-  const handleCustomModelBlur = useCallback(
-    async (modelId: string) => {
-      if (menuModelOptions.some((m) => m.id === modelId)) return
-      setCustomModelStatus({ state: 'loading', error: null })
-      try {
-        const results = await invoke('get-models-info', [modelId], serverUrlForModels)
-        const info = results?.[0]
-        if (info && !info.exists) {
-          setCustomModelStatus({ state: 'error', error: info.error ?? t('app.settings.worldModel.modelNotFound') })
-        } else if (info?.error) {
-          setCustomModelStatus({ state: 'error', error: info.error })
-        } else {
-          setCustomModelStatus({ state: 'idle', error: null })
-          setMenuModelOptions((prev) => [...prev, { id: modelId, isLocal: null, sizeBytes: info?.size_bytes ?? null }])
-          if (!savedCustomModels.includes(modelId)) {
-            void saveSettings({ ...settings, custom_models: [...savedCustomModels, modelId] })
-          }
-        }
-      } catch {
-        setCustomModelStatus({ state: 'error', error: t('app.settings.worldModel.couldNotCheckModel') })
-      }
-    },
-    [menuModelOptions, serverUrlForModels, savedCustomModels, settings, saveSettings, t]
-  )
-
   const handleConfirmDeleteCache = useCallback(async () => {
     if (!showDeleteCacheModal) return
     const modelId = showDeleteCacheModal
     setShowDeleteCacheModal(null)
     await invoke('delete-cached-model', modelId, serverUrlForModels)
-    if (savedCustomModels.includes(modelId)) {
-      // Custom model: remove from cache AND from custom list
-      const updated = savedCustomModels.filter((m) => m !== modelId)
-      void saveSettings({ ...settings, custom_models: updated })
-      setMenuModelOptions((prev) => prev.filter((m) => m.id !== modelId))
-      if (menuWorldModel === modelId) {
-        const fallback = menuModelOptions.find((m) => m.id !== modelId)?.id ?? settings.engine_model
-        setMenuWorldModel(fallback)
-      }
-    } else {
-      // Default model: just update local status
-      setMenuModelOptions((prev) => prev.map((m) => (m.id === modelId ? { ...m, isLocal: false } : m)))
-    }
-  }, [
-    showDeleteCacheModal,
-    savedCustomModels,
-    settings,
-    saveSettings,
-    menuModelOptions,
-    menuWorldModel,
-    serverUrlForModels
-  ])
+    // The next list-models refetch will re-classify the row as not_local.
+    // Update locally first so the UI reflects the action immediately.
+    setMenuModelOptions((prev) => prev.map((m) => (m.id === modelId ? { ...m, isLocal: false } : m)))
+  }, [showDeleteCacheModal, serverUrlForModels])
 
   // `reinstallEngine` orchestrates stop → install → start as one unit; the
   // returned terminal state lets us auto-close the install-log modal on
@@ -455,36 +398,20 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
       <SettingsSection title="app.settings.worldModel.title" description="app.settings.worldModel.description">
         <SettingsSelect
-          options={[...menuModelOptions]
-            .filter((model) => !savedCustomModels.includes(model.id) || model.isLocal === true)
-            .sort((a, b) => {
-              // 1. Downloaded before undownloaded
-              if (a.isLocal !== b.isLocal) return a.isLocal ? -1 : 1
-              // 2. Default models before custom
-              if (savedCustomModels.includes(a.id) !== savedCustomModels.includes(b.id))
-                return savedCustomModels.includes(a.id) ? 1 : -1
-              // 3. Alphabetical
-              return a.id.localeCompare(b.id)
-            })
-            .map((model) => {
-              const isCustom = savedCustomModels.includes(model.id)
-              return {
-                value: model.id,
-                rawLabel: model.id.replace(/^Overworld\//, ''),
-                prefix: [
-                  model.sizeBytes != null ? formatBytes(model.sizeBytes) : null,
-                  model.isLocal === false ? t('app.settings.worldModel.download') : null
-                ]
-                  .filter(Boolean)
-                  .join(' · '),
-                deletable: isCustom && model.isLocal === true && menuEngineMode === 'standalone',
-                cacheDeletable: !isCustom && model.isLocal === true && menuEngineMode === 'standalone',
-                dimmed: model.isLocal === false
-              }
-            })}
+          options={menuModelOptions.map((model) => ({
+            value: model.id,
+            rawLabel: model.id.replace(/^Overworld\//, ''),
+            prefix: [
+              model.sizeBytes != null ? formatBytes(model.sizeBytes) : null,
+              model.isLocal ? null : t('app.settings.worldModel.download')
+            ]
+              .filter(Boolean)
+              .join(' · '),
+            cacheDeletable: model.isLocal,
+            dimmed: !model.isLocal
+          }))}
           value={menuWorldModel}
           onChange={handleWorldModelChange}
-          onDelete={(modelId) => setShowDeleteCacheModal(modelId)}
           onCacheDelete={(modelId) => setShowDeleteCacheModal(modelId)}
           hideSelectedInDropdown
           disabled={
@@ -495,18 +422,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           disabledTooltip={
             menuEngineMode === 'standalone' && !engineReady ? 'app.settings.worldEngine.installFirstTooltip' : undefined
           }
-          allowCustom
-          onCustomBlur={(modelId) => void handleCustomModelBlur(modelId)}
-          customLabel="app.settings.worldModel.custom"
-          deleteLabel="app.settings.worldModel.deleteLocalCache"
           cacheDeleteLabel="app.settings.worldModel.deleteLocalCache"
-          rawCustomPrefix={
-            customModelStatus.state === 'loading'
-              ? t('app.settings.worldModel.checking')
-              : customModelStatus.state === 'error'
-                ? (customModelStatus.error ?? t('app.settings.worldModel.modelNotFound'))
-                : undefined
-          }
         />
         {menuModelsError && (
           <p

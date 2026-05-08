@@ -2,11 +2,10 @@ import type { EngineStatus, SeedFileRecord, SeedSource } from './app'
 import type { Settings } from './settings'
 import type { PortalSparksTuning } from '../lib/portalSparksTuning'
 
-export type ModelInfo = {
+export type PickerModel = {
   id: string
   size_bytes: number | null
-  exists: boolean
-  error: string | null
+  is_local: boolean
 }
 
 export type RuntimeDiagnosticsMeta = {
@@ -257,13 +256,13 @@ export type IpcCommandMap = {
   'get-settings-path-str': { args: []; return: string }
   'open-settings': { args: []; return: void }
 
-  // Models — every handler is a thin proxy to the WorldEngine server's
-  // HTTP routes (auto-resolves to the local managed process when no URL
-  // is passed). The renderer passes its configured server URL in
-  // server-mode and lets the handler resolve to localhost in standalone.
-  'list-waypoint-models': { args: [serverUrl?: string]; return: string[] }
-  'list-cached-models': { args: [serverUrl?: string]; return: string[] }
-  'get-models-info': { args: [modelIds: string[], serverUrl?: string]; return: ModelInfo[] }
+  // Models — thin proxies to the WorldEngine server. `list-models`
+  // returns the canonical picker list (Waypoint collection ∪ cached,
+  // with size + cache-presence baked in); `delete-cached-model` mutates
+  // the active server's cache. The renderer doesn't talk to HuggingFace
+  // directly — the server is the single source of truth for what's
+  // available.
+  'list-models': { args: [serverUrl?: string]; return: PickerModel[] }
   'delete-cached-model': { args: [modelId: string, serverUrl?: string]; return: void }
 
   // Engine

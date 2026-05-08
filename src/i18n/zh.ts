@@ -200,14 +200,8 @@ const zh = {
         worldModel: {
           title: '世界模型',
           description: '要使用哪个 Overworld 模型来模拟你的世界？',
-          local: '本地',
           download: '下载',
-          removeCustomModel: '删除自定义模型',
-          custom: '自定义...',
-          checking: '检查中...',
-          modelNotFound: '未找到模型',
           couldNotLoadModelList: '无法加载模型列表',
-          couldNotCheckModel: '无法检查模型',
           deleteLocalCache: '删除模型'
         },
         volume: {

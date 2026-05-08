@@ -211,14 +211,8 @@ const goose = {
         worldModel: {
           title: 'World Model',
           description: 'which Overworld model will shape your pond?',
-          local: 'local',
           download: 'download',
-          removeCustomModel: 'Remove custom model',
-          custom: 'Custom...',
-          checking: 'checking...',
-          modelNotFound: 'Model not found',
           couldNotLoadModelList: 'Could not load model list',
-          couldNotCheckModel: 'Could not check model',
           deleteLocalCache: 'Delete the model'
         },
         volume: {

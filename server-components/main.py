@@ -125,10 +125,7 @@ except Exception:
 # `engine.manager` imports to call-time.
 
 from server.caches import TtlCache  # noqa: E402
-from server.routes import (  # noqa: E402
-    ModelInfoResponse,
-    router,
-)
+from server.routes import ModelSize, router  # noqa: E402
 from server.startup import ServerStartup  # noqa: E402
 
 # Cached HuggingFace metadata is stable for minutes at a time — the
@@ -152,7 +149,7 @@ async def lifespan(app: FastAPI):
     startup = ServerStartup()
     app.state.startup = startup
     app.state.system_monitor = SystemMonitor.collect()
-    app.state.model_info_cache = TtlCache[str, ModelInfoResponse](ttl_seconds=HF_METADATA_TTL_SECONDS)
+    app.state.model_size_cache = TtlCache[str, ModelSize](ttl_seconds=HF_METADATA_TTL_SECONDS)
     app.state.waypoint_models_cache = TtlCache[str, list[str]](ttl_seconds=HF_METADATA_TTL_SECONDS)
     # Single-session gate. The WS endpoint claims this slot on accept and
     # clears it on teardown; concurrent handshakes from a second client

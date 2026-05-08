@@ -209,14 +209,8 @@ const ja = {
         worldModel: {
           title: 'ワールドモデル',
           description: 'どの Overworld モデルで世界をシミュレートしますか？',
-          local: 'ローカル',
           download: 'ダウンロード',
-          removeCustomModel: 'カスタムモデルを削除',
-          custom: 'カスタム...',
-          checking: '確認中...',
-          modelNotFound: 'モデルが見つかりません',
           couldNotLoadModelList: 'モデル一覧を読み込めませんでした',
-          couldNotCheckModel: 'モデルを確認できませんでした',
           deleteLocalCache: 'モデルを削除'
         },
         volume: {

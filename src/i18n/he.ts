@@ -203,14 +203,8 @@ const he = {
         worldModel: {
           title: 'מודל עולם',
           description: 'איזה מודל Overworld ידמה את העולם שלך?',
-          local: 'מקומי',
           download: 'הורדה',
-          removeCustomModel: 'הסר מודל מותאם אישית',
-          custom: 'מותאם אישית...',
-          checking: 'בודק...',
-          modelNotFound: 'המודל לא נמצא',
           couldNotLoadModelList: 'לא ניתן לטעון את רשימת המודלים',
-          couldNotCheckModel: 'לא ניתן לבדוק את המודל',
           deleteLocalCache: 'מחק את המודל'
         },
         volume: {
