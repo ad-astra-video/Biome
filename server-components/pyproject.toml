@@ -66,7 +66,7 @@ llama-cpp-python = [
   { url = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.36-cu128-Basic-win-20260417/llama_cpp_python-0.3.36%2Bcu128.basic-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
 # Pins to a commit on Quark main. Bump the rev to update.
-quark = { git = "https://github.com/Overworldai/quark.git", rev = "c37860209c6e22c79e7c0ec27be69e6df4a21154" }
+quark = { git = "https://github.com/Overworldai/quark.git", rev = "e2a14aab7c7ce47b40d412b0848ca9b202f6d9b3" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
