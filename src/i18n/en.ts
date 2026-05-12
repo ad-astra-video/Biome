@@ -219,15 +219,14 @@ const en = {
           world_engine: 'World Engine',
           quark: 'Quark'
         },
-        experience: {
-          title: 'Experience',
-          description: 'what kind of experience will you have?',
+        simulation: {
+          title: 'Simulation',
+          description: 'how will your world be simulated?',
           worldModel: 'World Model',
-          worldModelDescription:
-            'The Overworld world model that will simulate your world.\nWe recommend that you use the newest and largest model that your system can run.',
+          worldModelDescription: 'Simulates your world. Pick the newest, largest one your system can handle.',
           backend: 'Backend',
           backendDescription:
-            'Which inference backend will be used for the world model.\nWorld Engine is our default option, but Quark is our new backend with macOS support and more.'
+            'Runs the world model. World Engine is the default; Quark is experimental and supports macOS.'
         },
         worldModel: {
           download: 'download',

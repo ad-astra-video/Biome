@@ -218,15 +218,15 @@ const ja = {
           world_engine: 'World Engine',
           quark: 'Quark'
         },
-        experience: {
-          title: 'エクスペリエンス',
-          description: 'どんな体験にしますか？',
+        simulation: {
+          title: 'シミュレーション',
+          description: 'あなたの世界はどのようにシミュレートしますか？',
           worldModel: 'ワールドモデル',
           worldModelDescription:
-            '世界をシミュレートする Overworld のワールドモデル。\nお使いのシステムで動作する範囲で、最も新しく最も大きいモデルをおすすめします。',
+            'あなたの世界をシミュレートします。お使いのシステムで動作する範囲で、最も新しく最も大きいモデルを選んでください。',
           backend: 'バックエンド',
           backendDescription:
-            'ワールドモデルの推論に使用するバックエンド。\nWorld Engine が既定ですが、Quark は macOS 対応などを備えた新しいバックエンドです。'
+            'ワールドモデルを実行します。既定は World Engine。Quark は実験的なバックエンドで、macOS にも対応しています。'
         },
         worldModel: {
           download: 'ダウンロード',

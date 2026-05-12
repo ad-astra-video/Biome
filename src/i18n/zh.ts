@@ -208,15 +208,13 @@ const zh = {
           world_engine: 'World Engine',
           quark: 'Quark'
         },
-        experience: {
-          title: '体验',
-          description: '想要怎样的体验？',
+        simulation: {
+          title: '模拟',
+          description: '你的世界将如何被模拟？',
           worldModel: '世界模型',
-          worldModelDescription:
-            '用于模拟你的世界的 Overworld 世界模型。\n建议在你的系统能够运行的范围内，使用最新且最大的模型。',
+          worldModelDescription: '模拟你的世界。请选择你的系统能够运行的最新、最大的模型。',
           backend: '后端',
-          backendDescription:
-            '用于运行世界模型的推理后端。\nWorld Engine 是默认选项，Quark 是我们的新后端，支持 macOS 等更多功能。'
+          backendDescription: '运行世界模型。World Engine 是默认选项；Quark 为实验性后端，支持 macOS。'
         },
         worldModel: {
           download: '下载',

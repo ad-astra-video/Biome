@@ -211,15 +211,13 @@ const he = {
           world_engine: 'World Engine',
           quark: 'Quark'
         },
-        experience: {
-          title: 'חוויה',
-          description: 'איזו חוויה תרצה לקבל?',
+        simulation: {
+          title: 'סימולציה',
+          description: 'איך יידמה העולם שלך?',
           worldModel: 'מודל עולם',
-          worldModelDescription:
-            'מודל העולם של Overworld שידמה את העולם שלך.\nמומלץ להשתמש במודל החדש והגדול ביותר שהמערכת שלך מסוגלת להריץ.',
+          worldModelDescription: 'מדמה את העולם שלך. בחר את החדש והגדול ביותר שהמערכת שלך מסוגלת להריץ.',
           backend: 'מנגנון',
-          backendDescription:
-            'מנגנון האינפרנס שיריץ את מודל העולם.\nWorld Engine הוא ברירת המחדל, ו-Quark הוא המנגנון החדש שלנו עם תמיכת macOS ועוד.'
+          backendDescription: 'מריץ את מודל העולם. World Engine הוא ברירת המחדל; Quark ניסיוני ותומך ב-macOS.'
         },
         worldModel: {
           download: 'הורדה',

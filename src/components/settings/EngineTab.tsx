@@ -625,11 +625,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         />
       )}
 
-      <SettingsSection title="app.settings.experience.title" description="app.settings.experience.description">
+      <SettingsSection title="app.settings.simulation.title" description="app.settings.simulation.description">
         <div className="flex flex-col gap-[1cqh]">
           <SettingsRow
-            label={t('app.settings.experience.worldModel')}
-            hint={t('app.settings.experience.worldModelDescription')}
+            label={t('app.settings.simulation.worldModel')}
+            hint={t('app.settings.simulation.worldModelDescription')}
           >
             <SettingsSelect
               options={[...menuModelOptions]
@@ -707,8 +707,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
             </p>
           )}
           <SettingsRow
-            label={t('app.settings.experience.backend')}
-            hint={t('app.settings.experience.backendDescription')}
+            label={t('app.settings.simulation.backend')}
+            hint={t('app.settings.simulation.backendDescription')}
           >
             <SettingsSelect
               options={effectiveBackendOptions.map((b) => ({

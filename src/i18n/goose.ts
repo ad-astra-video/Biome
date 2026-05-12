@@ -220,15 +220,14 @@ const goose = {
           world_engine: 'World Engine',
           quark: 'Quark'
         },
-        experience: {
-          title: 'Pond',
-          description: 'what kind of pond will you paddle in?',
+        simulation: {
+          title: 'Pondulation',
+          description: 'how will your pond be paddled?',
           worldModel: 'World Model',
-          worldModelDescription:
-            'The Overworld world model that will shape your pond.\nPick the newest, biggest model your pond can hold.',
+          worldModelDescription: 'Shapes your pond. Pick the newest, biggest model your pond can hold.',
           backend: 'Backend',
           backendDescription:
-            'Which inference backend will drive the flock.\nWorld Engine is the trusty old waddler; Quark is our new fledgling with macOS feathers and then some.'
+            'Drives the flock. World Engine is the trusty old waddler; Quark is our experimental new fledgling with macOS feathers.'
         },
         worldModel: {
           download: 'download',
