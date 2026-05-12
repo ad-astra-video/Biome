@@ -191,6 +191,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     engineError,
     isStandaloneMode,
     isServerRunning,
+    engineReady: lifecycle.state.kind === 'ready',
     stopServer
   })
 
