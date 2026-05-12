@@ -229,8 +229,6 @@ const ja = {
             'ワールドモデルの推論に使用するバックエンド。\nWorld Engine が既定ですが、Quark は macOS 対応などを備えた新しいバックエンドです。'
         },
         worldModel: {
-          title: 'ワールドモデル',
-          description: 'どの Overworld モデルで世界をシミュレートしますか？',
           download: 'ダウンロード',
           couldNotLoadModelList: 'モデル一覧を読み込めませんでした',
           deleteLocalCache: 'モデルを削除'

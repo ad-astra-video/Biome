@@ -219,8 +219,6 @@ const zh = {
             '用于运行世界模型的推理后端。\nWorld Engine 是默认选项，Quark 是我们的新后端，支持 macOS 等更多功能。'
         },
         worldModel: {
-          title: '世界模型',
-          description: '要使用哪个 Overworld 模型来模拟你的世界？',
           download: '下载',
           couldNotLoadModelList: '无法加载模型列表',
           deleteLocalCache: '删除模型'

@@ -222,8 +222,6 @@ const he = {
             'מנגנון האינפרנס שיריץ את מודל העולם.\nWorld Engine הוא ברירת המחדל, ו-Quark הוא המנגנון החדש שלנו עם תמיכת macOS ועוד.'
         },
         worldModel: {
-          title: 'מודל עולם',
-          description: 'איזה מודל Overworld ידמה את העולם שלך?',
           download: 'הורדה',
           couldNotLoadModelList: 'לא ניתן לטעון את רשימת המודלים',
           deleteLocalCache: 'מחק את המודל'

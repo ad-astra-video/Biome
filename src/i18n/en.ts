@@ -230,8 +230,6 @@ const en = {
             'Which inference backend will be used for the world model.\nWorld Engine is our default option, but Quark is our new backend with macOS support and more.'
         },
         worldModel: {
-          title: 'World Model',
-          description: 'which Overworld model will simulate your world?',
           download: 'download',
           couldNotLoadModelList: 'Could not load model list',
           deleteLocalCache: 'Delete the model'

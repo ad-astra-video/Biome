@@ -2,15 +2,7 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { useTranslation } from 'react-i18next'
 import { invoke } from '../../bridge'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
-import {
-  ENGINE_BACKEND_OPTIONS,
-  ENGINE_MODES,
-  QUANT_OPTIONS,
-  localhostUrl,
-  type EngineBackend,
-  type QuantOption,
-  type Settings
-} from '../../types/settings'
+import { ENGINE_MODES, localhostUrl, type EngineBackend, type QuantOption, type Settings } from '../../types/settings'
 import type { TranslationKey } from '../../i18n'
 import { useEngineLifecycle, type LifecycleState } from '../../context/engineLifecycle/engineLifecycleContextValue'
 import { useConnection } from '../../context/streaming/connection'
@@ -37,36 +29,6 @@ type MenuModelOption = {
  *  saving server-mode with that URL would teardown the server during
  *  the mode switch and immediately disconnect the user. */
 type ServerUrlStatus = 'idle' | 'loading' | 'valid' | 'error' | 'ownManaged'
-
-const isMac = navigator.platform.startsWith('Mac')
-
-/** Client-side prediction of the host's capability matrix, mirroring
- *  `supported_capabilities()` on the server. Used until the `/health`
- *  probe lands the authoritative `serverCapabilities`, and as the
- *  fallback for older servers without the field.
- *
- *    - Apple Silicon: only `quark`, only `none`. The legacy `world_engine`
- *      package is CUDA-only and doesn't import; `quark.EngineMetal`
- *      internally forces all-bf16, so INT8 / FP8 are silently overridden.
- *    - CUDA: both backends, with `quark` excluding `intw8a8` (no INT8
- *      weight-only path on CUDA-quark today). `world_engine` keeps the
- *      full set.
- *
- *  The quant map is keyed by backend so the dropdown reacts to an
- *  in-flight backend toggle without a save + reconnect — same shape as
- *  the server-reported `ServerCapabilities.quants`. `Partial` mirrors
- *  the server's contract: entries exist only for backends listed in
- *  `backends`, so a lookup for a non-advertised backend is `undefined`
- *  rather than an empty array. */
-const PREDICTED_CAPABILITIES: {
-  backends: EngineBackend[]
-  quants: Partial<Record<EngineBackend, QuantOption[]>>
-} = isMac
-  ? { backends: ['quark'], quants: { quark: ['none'] } }
-  : {
-      backends: [...ENGINE_BACKEND_OPTIONS],
-      quants: { world_engine: [...QUANT_OPTIONS], quark: ['none', 'fp8w8a8'] }
-    }
 
 const formatBytes = (bytes: number): string => {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`
@@ -118,34 +80,29 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const [menuServerUrl, setMenuServerUrl] = useState(configServerUrl)
   const [menuWorldModel, setMenuWorldModel] = useState(configWorldModel)
   const [menuQuant, setMenuQuant] = useState<QuantOption>(settings.engine_quant ?? 'none')
-  const [menuEngineBackend, setMenuEngineBackend] = useState<EngineBackend>(() => {
-    const saved = settings.engine_backend ?? 'world_engine'
-    // On Mac, `world_engine` isn't a runnable choice — coerce to `quark`
-    // at init so the dropdown reflects something that can actually load
-    // before the server's capability probe lands. Server-driven clamps
-    // below take over once `serverCapabilities` arrives.
-    return isMac && saved === 'world_engine' ? 'quark' : saved
-  })
+  const [menuEngineBackend, setMenuEngineBackend] = useState<EngineBackend>(
+    () => settings.engine_backend ?? 'world_engine'
+  )
   const [menuCapInferenceFps, setMenuCapInferenceFps] = useState(() => settings.cap_inference_fps ?? true)
 
-  // Effective option sets for the backend / quant dropdowns. The server
-  // is the source of truth — anywhere `serverCapabilities` is populated,
-  // use it directly. Pre-probe (or on probe failure / older servers
-  // without the field) fall back to the client-side platform prediction
-  // in `predictedCapabilities`. The quant set is keyed by the in-flight
-  // backend selection so the dropdown reacts immediately when the user
-  // toggles between backends with different quant support (e.g. CUDA
-  // quark which excludes INT8 vs CUDA world_engine which supports it).
-  const effectiveBackendOptions = useMemo<EngineBackend[]>(() => {
-    if (serverCapabilities) return [...serverCapabilities.backends]
-    return PREDICTED_CAPABILITIES.backends
-  }, [serverCapabilities])
+  // Effective option sets for the backend / quant dropdowns come straight
+  // from the server-reported capabilities. Pre-probe the arrays are empty
+  // and the dropdowns disable themselves — `PROTOCOL_VERSION` gating means
+  // we never connect to a server that doesn't ship this field, and the
+  // controls aren't actionable until a valid server lands anyway. The
+  // quant set is keyed by the in-flight backend selection so the dropdown
+  // reacts immediately when the user toggles between backends with
+  // different quant support (e.g. CUDA quark excludes INT8 while CUDA
+  // world_engine supports it).
+  const effectiveBackendOptions = useMemo<EngineBackend[]>(
+    () => (serverCapabilities ? [...serverCapabilities.backends] : []),
+    [serverCapabilities]
+  )
 
-  const effectiveQuantOptions = useMemo<QuantOption[]>(() => {
-    const fromServer = serverCapabilities?.quants[menuEngineBackend]
-    if (fromServer && fromServer.length > 0) return [...fromServer]
-    return PREDICTED_CAPABILITIES.quants[menuEngineBackend] ?? []
-  }, [serverCapabilities, menuEngineBackend])
+  const effectiveQuantOptions = useMemo<QuantOption[]>(
+    () => [...(serverCapabilities?.quants[menuEngineBackend] ?? [])],
+    [serverCapabilities, menuEngineBackend]
+  )
 
   // Snap each dropdown to a valid value when its effective set changes —
   // covers initial probe (where the server may report a tighter set than
@@ -615,6 +572,13 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               }))}
               value={menuEngineBackend}
               onChange={(v) => setMenuEngineBackend(v as EngineBackend)}
+              disabled={
+                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+              }
+              disabledTooltip={
+                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+              }
             />
           </SettingsRow>
         </div>
@@ -633,7 +597,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               }))}
               value={menuQuant}
               onChange={(v) => setMenuQuant(v as QuantOption)}
-              disabled={menuEngineMode === 'standalone' && !engineReady}
+              disabled={
+                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+              }
               disabledTooltip={
                 menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
               }

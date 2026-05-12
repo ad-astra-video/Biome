@@ -231,8 +231,6 @@ const goose = {
             'Which inference backend will drive the flock.\nWorld Engine is the trusty old waddler; Quark is our new fledgling with macOS feathers and then some.'
         },
         worldModel: {
-          title: 'World Model',
-          description: 'which Overworld model will shape your pond?',
           download: 'download',
           couldNotLoadModelList: 'Could not load model list',
           deleteLocalCache: 'Delete the model'
