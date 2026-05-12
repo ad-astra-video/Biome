@@ -121,7 +121,12 @@ WARMUP_TOTAL_STEPS = 3  # 1: reset, 2: append seed, 3: generate first frame
 # cleanly into quark's all-bf16 default. `Quant.INTW8A8` is omitted
 # deliberately — `supported_capabilities()` doesn't advertise it for
 # quark, so a missing key here means the capability filter was bypassed.
-_QUARK_QUANT_MAP: dict[Quant | None, str | None] = {
+# Keys are typed `str | None` (rather than `Quant | None`) because
+# `load_engine` carries the user-supplied quant as `str | None` end-to-
+# end — the dict literal still uses `Quant.*` members for self-
+# documenting source, which are themselves `str` at runtime via
+# `StrEnum`.
+_QUARK_QUANT_MAP: dict[str | None, str | None] = {
     None: None,
     Quant.NONE: None,
     Quant.FP8W8A8: "fp8",
@@ -178,6 +183,20 @@ class UnsupportedBackendError(ValueError):
 
     def __init__(self, backend: object) -> None:
         super().__init__(f"Unsupported engine backend {backend!r}; expected 'world_engine' or 'quark'")
+
+
+class QuarkUnsupportedQuantError(ValueError):
+    """Raised when `load_engine(backend='quark', quant=…)` is invoked with
+    a quant that `_QUARK_QUANT_MAP` has no translation for. Means
+    `supported_capabilities()` advertised a quant the quark column
+    doesn't actually implement — i.e. the capability filter was bypassed
+    and the bug is in the matrix, not at the call site."""
+
+    def __init__(self, requested_quant: str | None) -> None:
+        super().__init__(
+            f"quark backend does not support quant {requested_quant!r}; "
+            "capability filter should have rejected this upstream"
+        )
 
 
 @dataclass(frozen=True)
@@ -552,10 +571,7 @@ class WorldEngineManager:
                 try:
                     backend_quant = _QUARK_QUANT_MAP[requested_quant]
                 except KeyError as e:
-                    raise ValueError(
-                        f"quark backend does not support quant {requested_quant!r}; "
-                        f"capability filter should have rejected this upstream"
-                    ) from e
+                    raise QuarkUnsupportedQuantError(requested_quant) from e
             else:
                 backend_quant = requested_quant
 

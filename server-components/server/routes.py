@@ -39,7 +39,12 @@ import structlog
 import yaml
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from huggingface_hub import constants as hf_constants
-from huggingface_hub import get_collection, hf_hub_download, scan_cache_dir, try_to_load_from_cache
+from huggingface_hub import (
+    get_collection,
+    hf_hub_download,  # pyright: ignore[reportUnknownVariableType]  -- partial stubs for the `dry_run` overload bleed `Unknown` through
+    scan_cache_dir,
+    try_to_load_from_cache,
+)
 from huggingface_hub import model_info as hf_model_info
 from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 from pydantic import BaseModel
@@ -488,9 +493,7 @@ async def list_models(
     # cache miss; both are HF metadata round-trips that benefit from
     # interleaving.
     not_cached_locally = [id_ for id_ in picker_ids if id_ not in waypoint_cached_model_types]
-    fetched_types = await asyncio.gather(
-        *(_get_model_type(id_, model_type_cache) for id_ in not_cached_locally)
-    )
+    fetched_types = await asyncio.gather(*(_get_model_type(id_, model_type_cache) for id_ in not_cached_locally))
     hf_model_types = dict(zip(not_cached_locally, fetched_types, strict=True))
 
     def _model_type(id_: str) -> str | None:
