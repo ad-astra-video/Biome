@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getServerState } from '../lib/serverState.js'
 import type { PickerModel } from '../../src/types/ipc.js'
+import type { EngineBackend } from '../../src/types/protocol.generated.js'
 
 const FETCH_TIMEOUT_MS = 10000
 
@@ -38,10 +39,15 @@ async function fetchWithTimeout(
 }
 
 export function registerModelsIpc(): void {
-  ipcMain.handle('list-models', async (_event, serverUrl?: string) => {
+  ipcMain.handle('list-models', async (_event, serverUrl?: string, backend?: EngineBackend) => {
     const url = resolveServerUrl(serverUrl)
     if (!url) return []
-    const response = await fetchWithTimeout(`${url}/api/models`)
+    // The `backend` query param tells the server which subset of
+    // model_types are loadable, so it can hide rows the active
+    // backend can't handle. Omitted ⇒ no filter (renderer hasn't
+    // settled on a backend yet — show everything).
+    const qs = backend ? `?backend=${encodeURIComponent(backend)}` : ''
+    const response = await fetchWithTimeout(`${url}/api/models${qs}`)
     if (!response || !response.ok) return []
     return (await response.json()) as PickerModel[]
   })

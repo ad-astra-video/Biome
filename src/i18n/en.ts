@@ -99,6 +99,11 @@ const en = {
           title: "That's Biome's built-in server",
           description:
             'It only runs while Biome is in standalone mode. Switch back to standalone, or point at an independent server.'
+        },
+        incompatibleModel: {
+          title: 'Incompatible Model',
+          description:
+            "The selected model can't be loaded with this backend. Switch backend, or choose a different model."
         }
       },
       startup: {

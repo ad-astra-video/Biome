@@ -39,7 +39,7 @@ import structlog
 import yaml
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from huggingface_hub import constants as hf_constants
-from huggingface_hub import get_collection, scan_cache_dir, try_to_load_from_cache
+from huggingface_hub import get_collection, hf_hub_download, scan_cache_dir, try_to_load_from_cache
 from huggingface_hub import model_info as hf_model_info
 from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 from pydantic import BaseModel
@@ -48,7 +48,15 @@ from structlog.contextvars import bound_contextvars
 from engine import Engines
 from engine.manager import ServerCapabilities, supported_capabilities
 from server.caches import TtlCache
-from server.protocol import PROTOCOL_VERSION, MessageId, StageId, SystemInfo, SystemInfoMessage, rpc_ok
+from server.protocol import (
+    PROTOCOL_VERSION,
+    EngineBackend,
+    MessageId,
+    StageId,
+    SystemInfo,
+    SystemInfoMessage,
+    rpc_ok,
+)
 from server.session.connection import Connection
 from server.session.handlers import build_init_response_data, prepare_session, run_preinit_handshake
 from server.session.workers import run_session
@@ -101,11 +109,19 @@ class PickerModel(BaseModel):
     single authority for what models the user can choose: the curated
     Waypoint collection plus whatever's locally cached, with size and
     cache-presence baked in. The renderer never talks to HuggingFace
-    directly."""
+    directly.
+
+    `model_type` is the `model_type:` field from the repo's
+    ``config.yaml`` — used by the renderer to validate the saved
+    model id against the in-flight backend selection (quark only
+    supports `waypoint-1.5`). `None` means the lookup failed (offline,
+    HF outage, malformed config); the renderer treats it as
+    backend-agnostic so a degraded path doesn't lock out the picker."""
 
     id: str
     size_bytes: int | None
     is_local: bool
+    model_type: str | None = None
 
 
 # Internal cache value; not exposed on a route. Carries the raw size
@@ -136,6 +152,17 @@ DEFAULT_WORLD_ENGINE_MODEL = "Overworld/Waypoint-1.5-1B"
 # carry this field at all — those are admitted via collection
 # membership, hence the OR semantics below.
 WAYPOINT_MODEL_TYPES: set[str] = {"waypoint-1", "waypoint-1.5"}
+
+# Per-backend subset of `WAYPOINT_MODEL_TYPES` that the backend can
+# actually load. `world_engine` accepts everything; quark only ships
+# the wp-1.5 implementation today and raises NotImplementedError on
+# wp-1 configs (no TAEHV VAE, different scheduler shape). The picker
+# uses this to filter incompatible models out per the in-flight
+# backend selection — see `/api/models?backend=…`.
+COMPATIBLE_MODEL_TYPES_BY_BACKEND: dict[EngineBackend, set[str]] = {
+    EngineBackend.WORLD_ENGINE: WAYPOINT_MODEL_TYPES,
+    EngineBackend.QUARK: {"waypoint-1.5"},
+}
 
 # Filename patterns excluded from "world-engine model size" calculations.
 # Repos bundle a diffusers-format VAE under `vae/` whose weights are a
@@ -194,6 +221,11 @@ def get_waypoint_models_cache(request: Request) -> TtlCache[str, list[str]]:
     return cache
 
 
+def get_model_type_cache(request: Request) -> TtlCache[str, str | None]:
+    cache: TtlCache[str, str | None] = request.app.state.model_type_cache
+    return cache
+
+
 # ============================================================================
 # HTTP Endpoints
 # ============================================================================
@@ -220,44 +252,53 @@ async def health(request: Request, startup: Annotated[ServerStartup, Depends(get
     )
 
 
-def _is_cached_waypoint_model(repo_id: str) -> bool:
-    """True if the repo's cached `config.yaml` declares a Waypoint
-    `model_type`. Used to admit non-collection cached repos into the
-    picker — Waypoint variants the user trained / downloaded outside
-    the curated collection. Returns False on any read / parse failure
-    (the repo just falls back to "must be in the collection")."""
-    try:
-        path = try_to_load_from_cache(repo_id, "config.yaml")
-    except Exception:  # noqa: BLE001  -- try_to_load_from_cache can raise on OS-level cache issues; treat as "not waypoint"
-        return False
-    if not isinstance(path, str):
-        return False
+def _read_model_type(path: str) -> str | None:
+    """Parse `model_type` out of a local `config.yaml`. Returns `None`
+    on any read / parse failure or when the field is missing / wrong
+    type. Used by both the cache-side admission check and the HF
+    fallback in `_resolve_model_type`."""
     try:
         with open(path, encoding="utf-8") as f:
             config: object = yaml.safe_load(f)
     except (OSError, yaml.YAMLError):
-        return False
+        return None
     if not isinstance(config, dict):
-        return False
+        return None
     model_type = cast("object", config.get("model_type"))  # pyright: ignore[reportUnknownMemberType]  -- yaml.safe_load is Any-typed
-    return isinstance(model_type, str) and model_type in WAYPOINT_MODEL_TYPES
+    return model_type if isinstance(model_type, str) else None
 
 
-def _scan_cache() -> tuple[dict[str, int], set[str]]:
+def _cached_model_type(repo_id: str) -> str | None:
+    """`model_type` from the repo's locally-cached `config.yaml`, or
+    `None` if no cached copy exists / the file is unreadable. Used by
+    `_scan_cache` to admit waypoint-shaped cached repos into the picker
+    without re-fetching from HF."""
+    try:
+        path = try_to_load_from_cache(repo_id, "config.yaml")
+    except Exception:  # noqa: BLE001  -- try_to_load_from_cache can raise on OS-level cache issues; treat as "no cached config"
+        return None
+    if not isinstance(path, str):
+        return None
+    return _read_model_type(path)
+
+
+def _scan_cache() -> tuple[dict[str, int], dict[str, str]]:
     """Scan the local HF hub cache. Returns `(cached_sizes,
-    waypoint_shaped_repos)` where `cached_sizes` maps every cached
-    model repo's id to its world-engine model size in bytes (the
-    safetensors weight files, mirroring `_resolve_model_size`'s filter
-    so on-disk and HF-derived sizes agree), and the second set filters
-    that to the subset whose `config.yaml` declares a Waypoint
-    `model_type`. Both empty on scan failure; never raises."""
+    waypoint_model_types)`. `cached_sizes` maps every cached model
+    repo's id to its world-engine model size in bytes (safetensors
+    weight files, mirroring `_resolve_model_size`'s filter so on-disk
+    and HF-derived sizes agree). `waypoint_model_types` is the subset
+    of cached repos whose `config.yaml` declares a Waypoint
+    `model_type`, mapped to that string — the picker uses the value
+    for per-backend compatibility filtering. Both empty on scan
+    failure; never raises."""
     try:
         info = scan_cache_dir()
     except Exception as e:  # noqa: BLE001  -- scan_cache_dir raises a wide grab-bag (CacheNotFound, OSError); soft-fall to empty
         logger.warning(f"scan_cache_dir failed: {e}")
-        return {}, set()
+        return {}, {}
     cached_sizes: dict[str, int] = {}
-    waypoint_ids: set[str] = set()
+    waypoint_model_types: dict[str, str] = {}
     for repo in info.repos:
         if repo.repo_type != "model":
             continue
@@ -275,9 +316,29 @@ def _scan_cache() -> tuple[dict[str, int], set[str]]:
                 seen_blobs.add(f.blob_path)
                 total += f.size_on_disk
         cached_sizes[repo.repo_id] = total
-        if _is_cached_waypoint_model(repo.repo_id):
-            waypoint_ids.add(repo.repo_id)
-    return cached_sizes, waypoint_ids
+        mt = _cached_model_type(repo.repo_id)
+        if mt is not None and mt in WAYPOINT_MODEL_TYPES:
+            waypoint_model_types[repo.repo_id] = mt
+    return cached_sizes, waypoint_model_types
+
+
+def _resolve_model_type(model_id: str) -> str | None:
+    """`model_type` for `model_id`, fetched on demand for non-cached
+    collection entries. Tries the local HF cache first; falls back to
+    downloading `config.yaml` (small file, ~1KB) via `hf_hub_download`.
+    Returns `None` on any failure — the picker treats `None` as
+    backend-agnostic so a degraded path doesn't hide rows entirely."""
+    local = _cached_model_type(model_id)
+    if local is not None:
+        return local
+    try:
+        path = hf_hub_download(repo_id=model_id, filename="config.yaml")
+    except (GatedRepoError, RepositoryNotFoundError):
+        return None
+    except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall
+        logger.warning(f"config.yaml fetch failed for {model_id}: {e}")
+        return None
+    return _read_model_type(path)
 
 
 def _resolve_model_size(model_id: str) -> ModelSize:
@@ -320,6 +381,25 @@ async def _get_size(model_id: str, cache: TtlCache[str, ModelSize]) -> ModelSize
     return size
 
 
+# Sentinel used to distinguish "TTL cache holds a real `None` (lookup
+# failed)" from "cache miss". The cache returns `None` on miss, so we
+# can't store `None` directly without round-tripping through the
+# resolver every call.
+_MODEL_TYPE_UNKNOWN = "__unknown__"
+
+
+async def _get_model_type(model_id: str, cache: TtlCache[str, str | None]) -> str | None:
+    """TTL-cached wrapper around `_resolve_model_type`. Stores the
+    sentinel `_MODEL_TYPE_UNKNOWN` for resolution failures so the
+    cache hit distinguishes "tried and couldn't resolve" from miss."""
+    cached = cache.get(model_id)
+    if cached is not None:
+        return None if cached == _MODEL_TYPE_UNKNOWN else cached
+    resolved = await asyncio.to_thread(_resolve_model_type, model_id)
+    cache.set(model_id, resolved if resolved is not None else _MODEL_TYPE_UNKNOWN)
+    return resolved
+
+
 async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
     """The curated Waypoint collection from HuggingFace. Falls back to the
     default model alone on any error so the picker is never empty; only
@@ -349,6 +429,8 @@ async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
 async def list_models(
     size_cache: Annotated[TtlCache[str, ModelSize], Depends(get_model_size_cache)],
     waypoint_cache: Annotated[TtlCache[str, list[str]], Depends(get_waypoint_models_cache)],
+    model_type_cache: Annotated[TtlCache[str, str | None], Depends(get_model_type_cache)],
+    backend: EngineBackend | None = None,
 ) -> list[PickerModel]:
     """Canonical world-model picker list.
 
@@ -357,22 +439,32 @@ async def list_models(
       - cached repos whose `config.yaml` declares a Waypoint `model_type`
         (admits dev variants the user trained outside the collection)
 
-    Each entry carries its size and a cache-presence flag. The renderer
+    Each entry carries its size, cache-presence flag, and resolved
+    `model_type` so the renderer can surface a "this model needs a
+    different backend" message even for ids that survived the
+    server-side filter via the `None` (unknown) sentinel. The renderer
     consumes this list directly — no client-side HuggingFace lookups,
     no separate availability / sizing round-trips, no manual "type a
     custom id" path. Non-world-model cache entries (safety classifier,
     scene-authoring image generators, etc.) coexist in the same HF
     cache root and are deliberately excluded.
 
+    When `backend` is supplied, rows whose `model_type` is known and
+    incompatible with that backend are dropped (`quark` → only
+    `waypoint-1.5`; `world_engine` → the full Waypoint set). Rows
+    whose `model_type` couldn't be resolved (offline / HF outage /
+    malformed config) pass through — better to show a row that fails
+    at load than to hide it silently.
+
     Sort order: cached models first, then the rest alphabetically by id;
     stable so the picker doesn't reshuffle between renders. The HF size
-    lookup per id is TTL-cached; the cache scan is fresh on every call
-    so a just-deleted model disappears immediately."""
-    cached_sizes, waypoint_cached_ids = await asyncio.to_thread(_scan_cache)
+    and model_type lookups per id are TTL-cached; the cache scan is
+    fresh on every call so a just-deleted model disappears immediately."""
+    cached_sizes, waypoint_cached_model_types = await asyncio.to_thread(_scan_cache)
     waypoint_collection_ids = set(await _fetch_waypoint_ids(waypoint_cache))
 
     picker_ids = sorted(
-        waypoint_collection_ids | waypoint_cached_ids,
+        waypoint_collection_ids | set(waypoint_cached_model_types),
         key=lambda i: (i not in cached_sizes, i.lower()),
     )
 
@@ -385,13 +477,33 @@ async def list_models(
     fetched_sizes = await asyncio.gather(*(_get_size(id_, size_cache) for id_ in not_cached))
     hf_sizes = dict(zip(not_cached, (s.size_bytes for s in fetched_sizes), strict=True))
 
+    # Model-type lookup: cached repos already resolved during the
+    # scan; collection-only entries get an on-demand HF fetch
+    # (TTL-cached). Runs in parallel with the size fetches above on
+    # cache miss; both are HF metadata round-trips that benefit from
+    # interleaving.
+    not_cached_locally = [id_ for id_ in picker_ids if id_ not in waypoint_cached_model_types]
+    fetched_types = await asyncio.gather(
+        *(_get_model_type(id_, model_type_cache) for id_ in not_cached_locally)
+    )
+    hf_model_types = dict(zip(not_cached_locally, fetched_types, strict=True))
+
+    def _model_type(id_: str) -> str | None:
+        return waypoint_cached_model_types.get(id_) or hf_model_types.get(id_)
+
+    compatible_types = COMPATIBLE_MODEL_TYPES_BY_BACKEND.get(backend) if backend is not None else None
+
     return [
         PickerModel(
             id=id_,
             size_bytes=cached_sizes[id_] if id_ in cached_sizes else hf_sizes.get(id_),
             is_local=id_ in cached_sizes,
+            model_type=_model_type(id_),
         )
         for id_ in picker_ids
+        # Pass through any row whose model_type couldn't be resolved
+        # so degraded paths don't silently empty the picker.
+        if compatible_types is None or _model_type(id_) is None or _model_type(id_) in compatible_types
     ]
 
 

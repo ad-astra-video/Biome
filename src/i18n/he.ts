@@ -95,6 +95,10 @@ const he = {
         serverOwnManaged: {
           title: 'זה השרת המובנה של Biome',
           description: 'הוא פועל רק כש-Biome במצב standalone. חזור למצב standalone, או הצבע על שרת עצמאי.'
+        },
+        incompatibleModel: {
+          title: 'מודל לא תואם',
+          description: 'המודל הנבחר לא יכול להיטען עם המנגנון הזה. החלף מנגנון או בחר מודל אחר.'
         }
       },
       startup: {

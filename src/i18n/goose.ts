@@ -100,6 +100,11 @@ const goose = {
           title: "That's Biome's home pond",
           description:
             'It only fills up while Biome is in standalone mode. Waddle back to standalone, or point at an independent pond.'
+        },
+        incompatibleModel: {
+          title: 'Incompatible Model',
+          description:
+            "This model won't waddle on the selected backend. Waddle to a different backend, or pick a model that fits."
         }
       },
       startup: {

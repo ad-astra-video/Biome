@@ -93,6 +93,10 @@ const zh = {
         serverOwnManaged: {
           title: '这是 Biome 的内置服务器',
           description: '它只在独立模式下运行。请切换回独立模式，或指向独立运行的服务器。'
+        },
+        incompatibleModel: {
+          title: '不兼容的模型',
+          description: '所选模型无法在该后端上加载。请切换后端或选择其他模型。'
         }
       },
       startup: {

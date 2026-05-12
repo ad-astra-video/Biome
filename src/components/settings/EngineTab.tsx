@@ -173,11 +173,20 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const [serverUrlStatus, setServerUrlStatus] = useState<ServerUrlStatus>('idle')
   const [lastValidatedServerUrl, setLastValidatedServerUrl] = useState('')
 
+  // True when `menuWorldModel` appears in the (backend-filtered) list
+  // the server returned. False when the saved model is a wp-1 sitting
+  // on a quark-only picker, or the user typed an id the server
+  // doesn't recognise. The `loadMenuModels` effect maintains it; the
+  // save-time guard reads it to refuse incompatible combos. Defaults
+  // to true so the picker stays usable until the first list lands.
+  const [menuWorldModelAvailable, setMenuWorldModelAvailable] = useState(true)
+
   const [showFixModal, setShowFixModal] = useState(false)
   const [showNukeModal, setShowNukeModal] = useState(false)
   const [showLocalInstallLog, setShowLocalInstallLog] = useState(false)
   const [showDeleteCacheModal, setShowDeleteCacheModal] = useState<string | null>(null)
   const [showServerErrorModal, setShowServerErrorModal] = useState(false)
+  const [showIncompatibleModelModal, setShowIncompatibleModelModal] = useState(false)
 
   const serverUrlUsesSecureTransport = /^\s*wss?:\/\//i.test(menuServerUrl)
     ? /^\s*wss:\/\//i.test(menuServerUrl)
@@ -209,6 +218,15 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           setShowServerErrorModal(true)
           return false
         }
+        // The server filters `list-models` by the in-flight backend,
+        // so a saved model that fell off the list is structurally
+        // incompatible (most often: wp-1 model + quark backend).
+        // Refuse the save and surface the modal — the user picks
+        // a compatible model or flips backend before retrying.
+        if (!menuWorldModelAvailable) {
+          setShowIncompatibleModelModal(true)
+          return false
+        }
         return true
       }
     }),
@@ -219,6 +237,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       menuQuant,
       menuEngineBackend,
       menuCapInferenceFps,
+      menuWorldModelAvailable,
       serverUrlStatus,
       configServerUrl
     ]
@@ -339,14 +358,18 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       setMenuModelsLoading(true)
       setMenuModelsError(null)
       try {
-        const models = await invoke('list-models', serverUrlForModels)
+        const models = await invoke('list-models', serverUrlForModels, menuEngineBackend)
         if (cancelled) return
 
         // Pin the currently-selected model into the list even if the
         // server doesn't report it (e.g. user has a stale config from
         // before the model was retired from the Waypoint collection and
-        // they've since cleared their cache). Without this the picker
-        // would render with no selected option.
+        // they've since cleared their cache, or the saved model is
+        // incompatible with the in-flight backend so the server
+        // filtered it out). Without this the picker would render with
+        // no selected option. The availability flag below lets the
+        // save-time guard distinguish "pinned because incompatible"
+        // from a legitimate selection.
         const haveSelected = models.some((m) => m.id === menuWorldModel)
         const options: MenuModelOption[] = models.map((m) => ({
           id: m.id,
@@ -357,6 +380,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           options.unshift({ id: menuWorldModel, isLocal: false, sizeBytes: null })
         }
         setMenuModelOptions(options)
+        setMenuWorldModelAvailable(haveSelected)
       } catch {
         if (cancelled) return
         setMenuModelsError(t('app.settings.worldModel.couldNotLoadModelList'))
@@ -372,7 +396,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     return () => {
       cancelled = true
     }
-  }, [menuWorldModel, menuEngineMode, serverUrlForModels, serverUrlStatus, t, engineReady])
+  }, [menuWorldModel, menuEngineMode, menuEngineBackend, serverUrlForModels, serverUrlStatus, t, engineReady])
 
   const handleEngineModeChange = (mode: 'server' | 'standalone') => {
     setMenuEngineMode(mode)
@@ -536,55 +560,64 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         />
       )}
 
-      <SettingsSection title="app.settings.worldModel.title" description="app.settings.worldModel.description">
-        <SettingsSelect
-          options={menuModelOptions.map((model) => ({
-            value: model.id,
-            rawLabel: model.id.replace(/^Overworld\//, ''),
-            prefix: [
-              model.sizeBytes != null ? formatBytes(model.sizeBytes) : null,
-              model.isLocal ? null : t('app.settings.worldModel.download')
-            ]
-              .filter(Boolean)
-              .join(' · '),
-            cacheDeletable: model.isLocal,
-            dimmed: !model.isLocal
-          }))}
-          value={menuWorldModel}
-          onChange={handleWorldModelChange}
-          onCacheDelete={(modelId) => setShowDeleteCacheModal(modelId)}
-          hideSelectedInDropdown
-          disabled={
-            menuModelsLoading ||
-            (menuEngineMode === 'standalone' && !engineReady) ||
-            (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
-          }
-          disabledTooltip={
-            menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
-          }
-          cacheDeleteLabel="app.settings.worldModel.deleteLocalCache"
-        />
-        {menuModelsError && (
-          <p
-            className={`
-              ${SETTINGS_MUTED_TEXT}
-              m-[0.35cqh_0_0.8cqh] text-left
-            `}
+      <SettingsSection title="app.settings.experience.title" description="app.settings.experience.description">
+        <div className="flex flex-col gap-[1cqh]">
+          <SettingsRow
+            label={t('app.settings.experience.worldModel')}
+            hint={t('app.settings.experience.worldModelDescription')}
           >
-            {menuModelsError}
-          </p>
-        )}
-      </SettingsSection>
-
-      <SettingsSection title="app.settings.experience.backend" description="app.settings.experience.backendDescription">
-        <SettingsSelect
-          options={effectiveBackendOptions.map((b) => ({
-            value: b,
-            label: `app.settings.engineBackend.${b}` as const
-          }))}
-          value={menuEngineBackend}
-          onChange={(v) => setMenuEngineBackend(v as EngineBackend)}
-        />
+            <SettingsSelect
+              options={menuModelOptions.map((model) => ({
+                value: model.id,
+                rawLabel: model.id.replace(/^Overworld\//, ''),
+                prefix: [
+                  model.sizeBytes != null ? formatBytes(model.sizeBytes) : null,
+                  model.isLocal ? null : t('app.settings.worldModel.download')
+                ]
+                  .filter(Boolean)
+                  .join(' · '),
+                cacheDeletable: model.isLocal,
+                dimmed: !model.isLocal
+              }))}
+              value={menuWorldModel}
+              onChange={handleWorldModelChange}
+              onCacheDelete={(modelId) => setShowDeleteCacheModal(modelId)}
+              hideSelectedInDropdown
+              disabled={
+                menuModelsLoading ||
+                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+              }
+              disabledTooltip={
+                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+              }
+              cacheDeleteLabel="app.settings.worldModel.deleteLocalCache"
+            />
+          </SettingsRow>
+          {menuModelsError && (
+            <p
+              className={`
+                ${SETTINGS_MUTED_TEXT}
+                m-[0.35cqh_0_0.8cqh] text-left
+              `}
+            >
+              {menuModelsError}
+            </p>
+          )}
+          <SettingsRow
+            label={t('app.settings.experience.backend')}
+            hint={t('app.settings.experience.backendDescription')}
+          >
+            <SettingsSelect
+              options={effectiveBackendOptions.map((b) => ({
+                value: b,
+                label: `app.settings.engineBackend.${b}` as const
+              }))}
+              value={menuEngineBackend}
+              onChange={(v) => setMenuEngineBackend(v as EngineBackend)}
+            />
+          </SettingsRow>
+        </div>
       </SettingsSection>
 
       <SettingsSection title="app.settings.performance.title" description="app.settings.performance.description">
@@ -672,6 +705,16 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           }}
           confirmLabel="app.buttons.editUrl"
           cancelLabel="app.buttons.revert"
+        />
+      )}
+
+      {showIncompatibleModelModal && (
+        <ConfirmModal
+          title="app.dialogs.incompatibleModel.title"
+          description="app.dialogs.incompatibleModel.description"
+          onConfirm={() => setShowIncompatibleModelModal(false)}
+          onCancel={() => setShowIncompatibleModelModal(false)}
+          confirmLabel="app.buttons.back"
         />
       )}
 

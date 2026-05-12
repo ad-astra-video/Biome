@@ -1,6 +1,6 @@
 import type { EngineStatus, SeedFileRecord, SeedSource } from './app'
 import type { Settings } from './settings'
-import type { ServerCapabilities } from './protocol.generated'
+import type { EngineBackend, ServerCapabilities } from './protocol.generated'
 import type { PortalSparksTuning } from '../lib/portalSparksTuning'
 
 // `ServerCapabilities` is the Pydantic model in `server.protocol`,
@@ -31,6 +31,15 @@ export type PickerModel = {
   id: string
   size_bytes: number | null
   is_local: boolean
+  /** Wire-level `model_type` from the repo's `config.yaml` — e.g.
+   *  `"waypoint-1"`, `"waypoint-1.5"`. Used by the settings panel
+   *  to validate the saved model against the in-flight backend
+   *  selection (quark only supports `waypoint-1.5`). `null` when
+   *  the lookup failed (offline / HF outage / malformed config) —
+   *  the server passes those rows through and the renderer treats
+   *  them as backend-agnostic to avoid silently emptying the picker
+   *  on degraded paths. */
+  model_type: string | null
 }
 
 export type RuntimeDiagnosticsMeta = {
@@ -287,7 +296,7 @@ export type IpcCommandMap = {
   // the active server's cache. The renderer doesn't talk to HuggingFace
   // directly — the server is the single source of truth for what's
   // available.
-  'list-models': { args: [serverUrl?: string]; return: PickerModel[] }
+  'list-models': { args: [serverUrl?: string, backend?: EngineBackend]; return: PickerModel[] }
   'delete-cached-model': { args: [modelId: string, serverUrl?: string]; return: void }
 
   // Engine
