@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { ENGINE_MODES, type Settings } from '../../types/settings'
-import { classifySettingsDiff } from '../../utils/settingsClassifier'
+import { pathsThatDiffer } from '../../utils/settingsClassifier'
 import type { PortalState } from '../../context/portal/portalStateMachine'
 import type { TranslatableError } from '../../i18n'
 import { createLogger } from '../../utils/logger'
@@ -48,18 +48,16 @@ export function useEngineRespawn(opts: {
     prevSettingsRef.current = settings
     if (!prev) return // baseline on first render
 
-    if (classifySettingsDiff(prev, settings) !== 'process') return
+    const changed = pathsThatDiffer(prev, settings, 'process')
+    if (changed.length === 0) return
     if (portalState === mainMenuState) return
 
     // `offline_mode` only takes effect when we own the server process; in
     // remote-server mode the env vars don't apply, so a hot toggle there is
-    // a no-op aside from any unrelated process-class field that flipped.
-    if (
-      prev.engine_mode === settings.engine_mode &&
-      prev.server_url === settings.server_url &&
-      prev.offline_mode !== settings.offline_mode &&
-      settings.engine_mode !== ENGINE_MODES.STANDALONE
-    ) {
+    // a no-op. Derive the "only offline_mode flipped" check from the
+    // changed-paths set so a future process-class field falls into the
+    // respawn branch by default instead of being silently swallowed here.
+    if (changed.length === 1 && changed[0] === 'offline_mode' && settings.engine_mode !== ENGINE_MODES.STANDALONE) {
       return
     }
 

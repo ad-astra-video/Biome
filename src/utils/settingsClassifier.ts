@@ -66,3 +66,15 @@ export const diffRequiresRestartConfirmation = (prev: Settings, next: Settings):
   const cls = classifySettingsDiff(prev, next)
   return cls === 'session' || cls === 'process'
 }
+
+/** Paths in the given class whose values differ between `prev` and `next`.
+ *  Lets callers reason about *which* fields tripped a class without
+ *  duplicating the SETTING_CLASSES table — e.g. `useEngineRespawn` skips
+ *  the respawn when the only process-class delta is `offline_mode` in
+ *  server mode (where the env vars don't apply). */
+export const pathsThatDiffer = (prev: Settings, next: Settings, cls: SettingClass): SettingPath[] => {
+  const paths = cls === 'process' ? PROCESS_PATHS : cls === 'session' ? SESSION_PATHS : cls === 'live' ? LIVE_PATHS : []
+  return paths.filter(
+    (p) => JSON.stringify(getValueAtPath(prev, p) ?? null) !== JSON.stringify(getValueAtPath(next, p) ?? null)
+  )
+}
