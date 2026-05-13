@@ -58,11 +58,19 @@ SCENE_AUTHORING_DEVICE = "cpu" if IS_DARWIN_ARM64 else "cuda"
 SAFETY_DEVICE = "cpu" if IS_DARWIN_ARM64 else "cuda"
 
 # Torch's OOM exception, re-exported under a backend-neutral name.
-# On Apple Silicon there's no ``torch.cuda.OutOfMemoryError`` to alias —
-# fall back to the plain ``MemoryError`` so the type still exists for
-# ``except devices.OutOfMemoryError`` blocks (which never trigger on
-# Apple anyway since there's no CUDA allocator pressure).
-OutOfMemoryError: type[BaseException] = MemoryError if IS_DARWIN_ARM64 else torch.cuda.OutOfMemoryError
+# On Apple Silicon there's no ``torch.cuda.OutOfMemoryError`` to alias.
+# A private sentinel class fills the slot so ``except devices.OutOfMemoryError``
+# still type-checks and resolves at runtime, but never matches anything —
+# the plain ``MemoryError`` would otherwise sweep up unrelated CPU-side
+# memory faults and falsely trigger the dtype-downgrade retry in
+# ``WorldEngineManager.load_engine``.
+class _UnreachableOOM(BaseException):
+    """Apple-Silicon stand-in for ``torch.cuda.OutOfMemoryError``. Never raised;
+    matched only by ``except devices.OutOfMemoryError`` blocks that exist to
+    handle the CUDA path."""
+
+
+OutOfMemoryError: type[BaseException] = _UnreachableOOM if IS_DARWIN_ARM64 else torch.cuda.OutOfMemoryError
 
 # Opaque NVML device handle — pynvml lacks proper stubs.
 NvmlHandle = object
