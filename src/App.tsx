@@ -11,7 +11,6 @@ import { AudioProvider } from './context/audio/AudioContext'
 import { useAudio } from './context/audio/audioContextValue'
 import AudioController from './components/audio/AudioController'
 import { EngineLifecycleProvider } from './context/engineLifecycle/EngineLifecycleContext'
-import { useEngineLifecycle } from './context/engineLifecycle/engineLifecycleContextValue'
 import { invoke } from './bridge'
 import type { AppUpdateInfo } from './types/ipc'
 import VideoContainer from './components/streaming/VideoContainer'
@@ -100,14 +99,6 @@ const AppShell = () => {
   } = usePortal()
   const { isStreaming, isUIActive, status: connectionStatus, prepareReturnToMainMenu } = useConnection()
   const sceneEditState = useSession().sceneEdit.state
-  const { state: lifecycleState } = useEngineLifecycle()
-  // The local-server boot pipeline runs in the background — the menu
-  // mounts immediately and the user can navigate while the engine
-  // finishes coming up. Engine-dependent controls (model picker,
-  // Launch click) gate on `lifecycleState.kind === 'ready'` rather than
-  // hiding the menu chrome; settings surfaces the live phase via
-  // EngineSection's status dot.
-  const isLifecyclePreparing = lifecycleState.kind === 'preparing'
   useGamepadNavigation(isUIActive)
   const {
     getBackgroundVideoElement,
@@ -261,13 +252,10 @@ const AppShell = () => {
   }, [transitionPhase])
 
   const handleLaunch = () => {
-    // While the local server is still coming up, swallow the click rather
-    // than racing the warm-connect flow with the lifecycle's own start —
-    // both paths port-scan + spawn, and the Electron-side single-server
-    // guard would surface the conflict as an error if the second spawn
-    // arrives before the first lands. Settings shows the live phase via
-    // EngineSection's status dot; the user can wait or check there.
-    if (isLifecyclePreparing) return
+    // Engine startup runs in the background — clicking while the server is
+    // still coming up takes the user into the loading layer, where
+    // warm-connect awaits the lifecycle's `ensureReady()` (coalesced via
+    // its in-flight lock) and the stage UI shows progress.
     if (
       portalState === portalStates.MAIN_MENU &&
       connectionStatus.kind !== 'connecting' &&
