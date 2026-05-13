@@ -354,6 +354,14 @@ def _scan_cache() -> tuple[dict[str, int], dict[str, str]]:
                     continue
                 seen_blobs.add(f.blob_path)
                 total += f.size_on_disk
+        # A repo with no weight files isn't actually usable — most often
+        # this is a config-only directory left behind by `_resolve_model_type`'s
+        # `hf_hub_download(filename="config.yaml")` call. Treating it as
+        # cached would surface a 0-byte "local" row in the picker. Drop
+        # it; the picker falls back to the HF size lookup and shows it
+        # as a downloadable entry.
+        if total == 0:
+            continue
         cached_sizes[repo.repo_id] = total
         mt = _cached_model_type(repo.repo_id)
         if mt is not None and mt in WAYPOINT_MODEL_TYPES:
