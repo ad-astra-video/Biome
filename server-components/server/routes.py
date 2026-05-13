@@ -255,8 +255,8 @@ def get_waypoint_models_cache(request: Request) -> TtlCache[str, list[str]]:
     return cache
 
 
-def get_model_type_cache(request: Request) -> TtlCache[str, str | None]:
-    cache: TtlCache[str, str | None] = request.app.state.model_type_cache
+def get_model_type_cache(request: Request) -> TtlCache[str, str]:
+    cache: TtlCache[str, str] = request.app.state.model_type_cache
     return cache
 
 
@@ -420,31 +420,28 @@ def _resolve_model_size(model_id: str) -> ModelSize:
 
 
 async def _get_size(model_id: str, cache: TtlCache[str, ModelSize]) -> ModelSize:
-    cached = cache.get(model_id)
-    if cached is not None:
-        return cached
-    size = await asyncio.to_thread(_resolve_model_size, model_id)
-    cache.set(model_id, size)
-    return size
+    return await cache.get_or_fetch(model_id, lambda: asyncio.to_thread(_resolve_model_size, model_id))
 
 
 # Sentinel used to distinguish "TTL cache holds a real `None` (lookup
-# failed)" from "cache miss". The cache returns `None` on miss, so we
-# can't store `None` directly without round-tripping through the
-# resolver every call.
+# failed)" from "cache miss". `TtlCache.get` already returns `None` for
+# missing entries, so we can't store `None` directly — the cache stores
+# the sentinel string instead, and `_get_model_type` translates it back
+# at the API boundary.
 _MODEL_TYPE_UNKNOWN = "__unknown__"
 
 
-async def _get_model_type(model_id: str, cache: TtlCache[str, str | None]) -> str | None:
+async def _get_model_type(model_id: str, cache: TtlCache[str, str]) -> str | None:
     """TTL-cached wrapper around `_resolve_model_type`. Stores the
     sentinel `_MODEL_TYPE_UNKNOWN` for resolution failures so the
     cache hit distinguishes "tried and couldn't resolve" from miss."""
-    cached = cache.get(model_id)
-    if cached is not None:
-        return None if cached == _MODEL_TYPE_UNKNOWN else cached
-    resolved = await asyncio.to_thread(_resolve_model_type, model_id)
-    cache.set(model_id, resolved if resolved is not None else _MODEL_TYPE_UNKNOWN)
-    return resolved
+
+    async def fetcher() -> str:
+        resolved = await asyncio.to_thread(_resolve_model_type, model_id)
+        return resolved if resolved is not None else _MODEL_TYPE_UNKNOWN
+
+    result = await cache.get_or_fetch(model_id, fetcher)
+    return None if result == _MODEL_TYPE_UNKNOWN else result
 
 
 async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
@@ -452,31 +449,27 @@ async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
     default model alone on any error so the picker is never empty; only
     successful fetches are cached, so a transient HF outage doesn't pin
     the picker at the default for the full TTL."""
-    cached = cache.get(WAYPOINT_COLLECTION_SLUG)
-    if cached is not None:
-        return cached
 
-    def _fetch() -> list[str] | None:
-        try:
+    async def fetcher() -> list[str]:
+        def _fetch() -> list[str]:
             collection = get_collection(WAYPOINT_COLLECTION_SLUG)
-        except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall to the default
-            logger.warning(f"waypoint collection fetch failed: {e}")
-            return None
-        return [item.item_id for item in collection.items if item.item_type == "model"]
+            return [item.item_id for item in collection.items if item.item_type == "model"]
 
-    fetched = await asyncio.to_thread(_fetch)
-    if fetched is None:
+        fetched = await asyncio.to_thread(_fetch)
+        return fetched or [DEFAULT_WORLD_ENGINE_MODEL]
+
+    try:
+        return await cache.get_or_fetch(WAYPOINT_COLLECTION_SLUG, fetcher)
+    except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall and don't cache
+        logger.warning(f"waypoint collection fetch failed: {e}")
         return [DEFAULT_WORLD_ENGINE_MODEL]
-    result = fetched or [DEFAULT_WORLD_ENGINE_MODEL]
-    cache.set(WAYPOINT_COLLECTION_SLUG, result)
-    return result
 
 
 @router.get("/api/models")
 async def list_models(
     size_cache: Annotated[TtlCache[str, ModelSize], Depends(get_model_size_cache)],
     waypoint_cache: Annotated[TtlCache[str, list[str]], Depends(get_waypoint_models_cache)],
-    model_type_cache: Annotated[TtlCache[str, str | None], Depends(get_model_type_cache)],
+    model_type_cache: Annotated[TtlCache[str, str], Depends(get_model_type_cache)],
     backend: EngineBackend | None = None,
 ) -> list[PickerModel]:
     """Canonical world-model picker list.
@@ -595,9 +588,6 @@ async def get_model_info(
     Sizes mirror `_resolve_model_size`'s filter (safetensors-only,
     diffusers VAE excluded) so a custom row's size aligns with the
     curated rows on the same picker."""
-    cached = cache.get(model_id)
-    if cached is not None:
-        return cached
 
     # Targeted cache probe — `try_to_load_from_cache` returning a string
     # path (vs `None` / the `_CACHED_NO_EXIST` sentinel) is the
@@ -612,8 +602,17 @@ async def get_model_info(
             return False
         return isinstance(path, str)
 
-    def _fetch() -> ModelInfoResponse:
-        info = hf_model_info(model_id, files_metadata=True)
+    def _fetch_sync() -> ModelInfoResponse:
+        try:
+            info = hf_model_info(model_id, files_metadata=True)
+        except GatedRepoError:
+            return ModelInfoResponse(
+                id=model_id, size_bytes=None, exists=True, is_local=False, error="Private or gated model"
+            )
+        except RepositoryNotFoundError:
+            return ModelInfoResponse(
+                id=model_id, size_bytes=None, exists=False, is_local=False, error="Model not found"
+            )
         size_bytes: int | None = None
         if hasattr(info, "siblings") and info.siblings:
             seen_blobs: set[str] = set()
@@ -634,22 +633,13 @@ async def get_model_info(
         )
 
     try:
-        result = await asyncio.to_thread(_fetch)
-    except GatedRepoError:
-        result = ModelInfoResponse(
-            id=model_id, size_bytes=None, exists=True, is_local=False, error="Private or gated model"
-        )
-    except RepositoryNotFoundError:
-        result = ModelInfoResponse(id=model_id, size_bytes=None, exists=False, is_local=False, error="Model not found")
+        return await cache.get_or_fetch(model_id, lambda: asyncio.to_thread(_fetch_sync))
     except Exception as e:  # noqa: BLE001  # pyright: ignore[reportUnusedExcept]  -- HF client raises a wide grab-bag (HTTPError/RequestException/HfHubHTTPError) that pyright's stubs don't model; fold them all into a soft response
         logger.warning(f"model-info error for {model_id}: {e}")
         # Transient — return without caching so the next call retries.
         return ModelInfoResponse(
             id=model_id, size_bytes=None, exists=True, is_local=False, error="Could not check model"
         )
-
-    cache.set(model_id, result)
-    return result
 
 
 @router.delete("/api/cached-model/{model_id:path}", status_code=204)

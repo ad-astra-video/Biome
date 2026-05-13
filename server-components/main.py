@@ -151,7 +151,7 @@ async def lifespan(app: FastAPI):
     app.state.system_monitor = SystemMonitor.collect()
     app.state.model_size_cache = TtlCache[str, ModelSize](ttl_seconds=HF_METADATA_TTL_SECONDS)
     app.state.waypoint_models_cache = TtlCache[str, list[str]](ttl_seconds=HF_METADATA_TTL_SECONDS)
-    app.state.model_type_cache = TtlCache[str, str | None](ttl_seconds=HF_METADATA_TTL_SECONDS)
+    app.state.model_type_cache = TtlCache[str, str](ttl_seconds=HF_METADATA_TTL_SECONDS)
     app.state.model_info_cache = TtlCache[str, ModelInfoResponse](ttl_seconds=HF_METADATA_TTL_SECONDS)
     # Single-session gate. The WS endpoint claims this slot on accept and
     # clears it on teardown; concurrent handshakes from a second client
