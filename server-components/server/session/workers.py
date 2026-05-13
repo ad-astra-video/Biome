@@ -308,7 +308,7 @@ def run_generator(
     pending: _PendingFlush | None = None
 
     def _flush_pending() -> None:
-        """JPEG-encode + queue any pending CPU frames."""
+        """JPEG-encode + queue any pending CPU frames as a single batch envelope."""
         nonlocal pending
         if pending is None:
             return
@@ -323,28 +323,33 @@ def run_generator(
             conn.update_gpu_metrics()
         t_metrics = time.perf_counter()
 
-        for jpeg in encoded:
-            conn.perceptual_frame_count += 1
-            t_queued = time.perf_counter()
-            profile = {
-                "t_infer_ms": round((p.t_infer - p.t_infer_start) * 1000, 1),
-                "t_sync_ms": round((p.t_sync - p.t_infer) * 1000, 1),
-                "t_enc_ms": round((t_enc - t_enc_start) * 1000, 1),
-                "t_metrics_ms": round((t_metrics - t_enc) * 1000, 1),
-                "t_overhead_ms": round((t_queued - t_metrics) * 1000, 1),
-            }
-            conn.queue_send(
-                conn.build_frame_envelope(
-                    jpeg,
-                    conn.perceptual_frame_count,
-                    p.client_ts,
-                    p.gen_time,
-                    temporal_compression=p.temporal_compression,
-                    profile=profile,
-                )
-            )
+        # frame_id of the first sub-frame in the batch; the client
+        # implicitly numbers subsequent sub-frames as first_frame_id + i.
+        first_frame_id = conn.perceptual_frame_count + 1
+        prev_count = conn.perceptual_frame_count
+        conn.perceptual_frame_count += len(encoded)
 
-        if conn.perceptual_frame_count % 60 == 0:
+        t_queued = time.perf_counter()
+        profile = {
+            "t_infer_ms": round((p.t_infer - p.t_infer_start) * 1000, 1),
+            "t_sync_ms": round((p.t_sync - p.t_infer) * 1000, 1),
+            "t_enc_ms": round((t_enc - t_enc_start) * 1000, 1),
+            "t_metrics_ms": round((t_metrics - t_enc) * 1000, 1),
+            "t_overhead_ms": round((t_queued - t_metrics) * 1000, 1),
+        }
+        conn.queue_send(
+            conn.build_batch_envelope(
+                encoded,
+                first_frame_id,
+                p.client_ts,
+                p.gen_time,
+                temporal_compression=p.temporal_compression,
+                profile=profile,
+            )
+        )
+
+        # Log once whenever the perceptual frame count crosses a 60-frame boundary.
+        if conn.perceptual_frame_count // 60 != prev_count // 60:
             logger.info("Sent frame", frame_id=conn.perceptual_frame_count, gen_ms=round(p.gen_time, 1))
 
     gen_was_paused = False
@@ -372,7 +377,7 @@ def run_generator(
                     seed = world_engine.primary_seed_frame
                     assert seed is not None, "seed must be loaded after generate_scene"
                     seed_jpeg = world_engine.frame_to_jpeg(seed)
-                    conn.queue_send(conn.build_frame_envelope(seed_jpeg, conn.perceptual_frame_count, 0.0, 0.0))
+                    conn.queue_send(conn.build_batch_envelope([seed_jpeg], conn.perceptual_frame_count, 0.0, 0.0))
                 except Exception as e:
                     logger.exception("Generate scene failed", operation="generate_scene")
                     req["future"].set_exception(e)

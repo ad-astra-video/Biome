@@ -12,7 +12,7 @@ import useSeedsDir from '../../hooks/seeds/useSeedsDir'
 import { createLogger } from '../../utils/logger'
 import { useConnectionActions } from '../../hooks/streaming/useConnectionActions'
 import { useEngineRespawn } from '../../hooks/streaming/useEngineRespawn'
-import { useFrameRenderer } from '../../hooks/streaming/useFrameRenderer'
+import { useFramePacer } from '../../hooks/streaming/useFramePacer'
 import { useLoadingFailureCleanup } from '../../hooks/streaming/useLoadingFailureCleanup'
 import { useInputLoop } from '../../hooks/streaming/useInputLoop'
 import { usePauseState } from '../../hooks/streaming/usePauseState'
@@ -46,12 +46,10 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     status: connectionStatus,
     statusStage,
     frame,
+    batch,
     frameId,
     latentGenMs,
     temporalCompression,
-    frameGenMsRef,
-    frameTemporalCompressionRef,
-    frameIdRef,
     server,
     inputLatency,
     logs: wsLogs,
@@ -122,7 +120,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
 
   const effectiveStatusStage = useMemo(() => statusStage ?? preConnectionStage, [statusStage, preConnectionStage])
 
-  const hasReceivedFrame = frame !== null
+  const hasReceivedFrame = frame !== null || batch !== null
   const isStreaming = state === states.STREAMING
   const inputEnabled = isStreaming && isReady && !isPaused && !settingsOpen && !connectionLost && !sceneEdit.isActive
 
@@ -262,10 +260,7 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     resume
   })
 
-  const { registerCanvas, canvasReady, frameTimelineRef } = useFrameRenderer({
-    frame,
-    refs: { gen: frameGenMsRef, compression: frameTemporalCompressionRef, id: frameIdRef }
-  })
+  const { registerCanvas, canvasReady, frameTimelineRef, metricsRef: pacerMetricsRef } = useFramePacer({ batch })
 
   const registerContainerRef = useCallback((element: HTMLDivElement | null) => {
     containerRef.current = element
@@ -345,9 +340,10 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       latentGenMs,
       temporalCompression,
       inputLatency,
-      timelineRef: frameTimelineRef
+      timelineRef: frameTimelineRef,
+      pacerMetricsRef
     }),
-    [frameId, latentGenMs, temporalCompression, inputLatency, frameTimelineRef]
+    [frameId, latentGenMs, temporalCompression, inputLatency, frameTimelineRef, pacerMetricsRef]
   )
 
   const seedsValue = useMemo<SeedsContextValue>(
