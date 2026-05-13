@@ -1,11 +1,61 @@
 import type { EngineStatus, SeedFileRecord, SeedSource } from './app'
 import type { Settings } from './settings'
+import type { EngineBackend, ServerCapabilities } from './protocol.generated'
 import type { PortalSparksTuning } from '../lib/portalSparksTuning'
+
+// `ServerCapabilities` is the Pydantic model in `server.protocol`,
+// shipped through codegen. Re-exported here so consumers reach for it
+// alongside the other IPC types without having to know about the
+// codegen file. Adding a new capability axis means extending the
+// Pydantic model, regenerating, and extending the renderer's clamp
+// logic — the IPC envelope stays unchanged.
+export type { ServerCapabilities }
+
+/** Result of a `/health` probe. `ok` covers reachability; `capabilities`
+ *  comes from the response body and is the server's source-of-truth
+ *  view of what it can run (matters in server mode where the remote
+ *  may be on a different platform than the client). `capabilities` is
+ *  absent on failed probes and on responses without the field (older
+ *  servers, JSON-parse failures); the renderer falls back to
+ *  client-side platform prediction in that case. `launched_from_standalone`
+ *  is true when the responding server is one Biome started itself
+ *  (used to refuse a "server" mode URL that points back at the
+ *  built-in standalone server). */
+export type ServerHealthResult = {
+  ok: boolean
+  capabilities?: ServerCapabilities
+  launched_from_standalone: boolean
+}
 
 export type PickerModel = {
   id: string
   size_bytes: number | null
   is_local: boolean
+  /** Wire-level `model_type` from the repo's `config.yaml` — e.g.
+   *  `"waypoint-1"`, `"waypoint-1.5"`. Used by the settings panel
+   *  to validate the saved model against the in-flight backend
+   *  selection (quark only supports `waypoint-1.5`). `null` when
+   *  the lookup failed (offline / HF outage / malformed config) —
+   *  the server passes those rows through and the renderer treats
+   *  them as backend-agnostic to avoid silently emptying the picker
+   *  on degraded paths. */
+  model_type: string | null
+}
+
+/** Result of validating a user-typed custom model id against
+ *  HuggingFace via `/api/model-info/{id}`. Mirrors `ModelInfoResponse`
+ *  on the server. `exists` is the yes/no the settings panel acts on;
+ *  `error` carries a user-facing reason for the no (gated, not-found)
+ *  or for transient failures where `exists` stays `true` so the user
+ *  isn't locked out by a flaky probe. `is_local` lets the picker show
+ *  the cache-delete affordance on custom rows the same as it does on
+ *  curated ones. */
+export type ModelInfo = {
+  id: string
+  size_bytes: number | null
+  exists: boolean
+  is_local: boolean
+  error: string | null
 }
 
 export type RuntimeDiagnosticsMeta = {
@@ -65,7 +115,7 @@ export type DiagnosticsApp = {
 }
 
 /** The machine running the Biome desktop app (Electron renderer).
- *  In server mode this is NOT the machine running the World Engine —
+ *  In server mode this is NOT the machine running the engine —
  *  see {@link DiagnosticsServer} for that. */
 export type DiagnosticsClient = {
   /** Platform identifier: "linux", "win32", or "darwin". */
@@ -96,7 +146,7 @@ export type DiagnosticsClient = {
   gpu_compositing: Record<string, string>
 }
 
-/** The machine running the World Engine server.  Same physical machine as
+/** The machine running the engine server.  Same physical machine as
  *  the client in standalone mode; a remote host in server mode.  null in
  *  the payload if the server was never reached (e.g. engine install
  *  failure, server didn't start). */
@@ -126,6 +176,10 @@ export type DiagnosticsSession = {
   requested_model: string | null
   /** Quantisation the client asked for (e.g. "int8", or null for default). */
   requested_quant: string | null
+  /** Inference backend the client asked for (`'world_engine'` / `'quark'`).
+   *  Null when the saved setting is absent — older builds wrote no value, and
+   *  the server-side default fills in `world_engine`. */
+  requested_backend: string | null
   /** Model the server confirmed loading (from init RPC response).
    *  null if init never completed (crash during warmup). */
   confirmed_model: string | null
@@ -200,7 +254,7 @@ export type DiagnosticsPayload = {
   app: DiagnosticsApp
   /** The machine running the Biome desktop app. */
   client: DiagnosticsClient
-  /** The machine running the World Engine server, or null if never reached. */
+  /** The machine running the engine server, or null if never reached. */
   server: DiagnosticsServer | null
   /** What the user was doing — present for loading/streaming errors. */
   session?: DiagnosticsSession
@@ -256,13 +310,18 @@ export type IpcCommandMap = {
   'get-settings-path-str': { args: []; return: string }
   'open-settings': { args: []; return: void }
 
-  // Models — thin proxies to the WorldEngine server. `list-models`
+  // Models — thin proxies to the engine server. `list-models`
   // returns the canonical picker list (Waypoint collection ∪ cached,
   // with size + cache-presence baked in); `delete-cached-model` mutates
   // the active server's cache. The renderer doesn't talk to HuggingFace
   // directly — the server is the single source of truth for what's
   // available.
-  'list-models': { args: [serverUrl?: string]; return: PickerModel[] }
+  'list-models': { args: [serverUrl?: string, backend?: EngineBackend]; return: PickerModel[] }
+  // Validate user-typed custom model ids against HuggingFace via the
+  // active server (curated `list-models` only knows the Waypoint
+  // collection + local cache; everything else round-trips here).
+  // Returns one ModelInfo per input id in the same order.
+  'get-models-info': { args: [modelIds: string[], serverUrl?: string]; return: ModelInfo[] }
   'delete-cached-model': { args: [modelId: string, serverUrl?: string]; return: void }
 
   // Engine
@@ -278,10 +337,7 @@ export type IpcCommandMap = {
   'is-server-running': { args: []; return: boolean }
   'is-server-ready': { args: []; return: boolean }
   'is-port-in-use': { args: [port: number]; return: boolean }
-  'probe-server-health': {
-    args: [healthUrl: string, timeoutMs?: number]
-    return: { reachable: boolean; launched_from_standalone: boolean }
-  }
+  'probe-server-health': { args: [healthUrl: string, timeoutMs?: number]; return: ServerHealthResult }
   'get-last-server-exit-tail': { args: []; return: string | null }
 
   // Seeds

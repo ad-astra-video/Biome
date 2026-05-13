@@ -48,6 +48,7 @@ export type BuildDiagnosticsOptions = {
     engineMode: 'standalone' | 'server'
     requestedModel: string | null
     requestedQuant: string | null
+    requestedBackend: string | null
   }
 }
 
@@ -107,6 +108,7 @@ function buildSession(
     engine_mode: opts.engineMode,
     requested_model: opts.requestedModel,
     requested_quant: opts.requestedQuant,
+    requested_backend: opts.requestedBackend,
     confirmed_model: server.model || null,
     inference_fps: server.inferenceFps
   }

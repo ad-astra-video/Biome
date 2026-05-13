@@ -60,6 +60,12 @@ export const MessageIdSchema = z.enum([
 ])
 export type MessageId = z.infer<typeof MessageIdSchema>
 
+export const EngineBackendSchema = z.enum(['world_engine', 'quark'])
+export type EngineBackend = z.infer<typeof EngineBackendSchema>
+
+export const QuantSchema = z.enum(['none', 'fp8w8a8', 'intw8a8'])
+export type Quant = z.infer<typeof QuantSchema>
+
 // ─── Models ───────────────────────────────────────────────────────────
 
 /** Static hardware/runtime identity, snapshot once at startup. */
@@ -84,6 +90,42 @@ export const ErrorSnapshotSchema = z.object({
   gpu_util_percent: z.number().optional()
 })
 export type ErrorSnapshot = z.infer<typeof ErrorSnapshotSchema>
+
+/**
+ * Per-config support sets the server can honour, surfaced through
+ * `/health` so the renderer can clamp its in-flight selections to
+ * options that will actually run. The server is the source of truth —
+ * anywhere the renderer has a dropdown that maps to a wire-level
+ * config, this is the canonical set to filter against. Client-side
+ * platform guesses are wrong in server mode where the remote may be
+ * on a different platform than the client.
+ *
+ * `quants` is keyed by `EngineBackend` because the supported quant
+ * set genuinely differs across backends on the same host:
+ *
+ *   - CUDA + `world_engine`: all three modes (`none`, `fp8w8a8`,
+ *     `intw8a8`).
+ *   - CUDA + `quark`: `none` and `fp8w8a8`. Quark's CUDA path does
+ *     not implement INT8 weight-only quantisation today.
+ *   - Apple Silicon + `quark`: `none` only — `quark.EngineMetal`
+ *     internally forces all-bf16 (no native fp8 in MSL, no int8
+ *     KV path), so anything else is silently overridden. (Apple
+ *     Silicon doesn't offer `world_engine` at all — the legacy
+ *     package is CUDA-only.)
+ *
+ * The dict only contains entries for backends in `backends`; the
+ * renderer indexes by the in-flight backend selection so the quant
+ * dropdown reacts instantly to a backend toggle without a save +
+ * reconnect round-trip. Surfaced through HTTP rather than WS (lives
+ * in `routes.HealthResponse`), but kept here so the codegen mirrors
+ * it to a Zod schema + TS type the renderer reuses for both shape
+ * parsing and the connection slice.
+ */
+export const ServerCapabilitiesSchema = z.object({
+  backends: z.array(EngineBackendSchema),
+  quants: z.record(EngineBackendSchema, z.array(QuantSchema))
+})
+export type ServerCapabilities = z.infer<typeof ServerCapabilitiesSchema>
 
 /**
  * Per-frame input snapshot from the renderer. `buttons` carries
@@ -126,10 +168,12 @@ export type PromptNotif = z.infer<typeof PromptNotifSchema>
  * server compares against the running session and reconfigures the
  * deltas. `quant` is the only nullable field: `None` means "no
  * quantization" (the renderer maps its `'none'` UI sentinel to null
- * on the wire).
+ * on the wire). `engine_backend` selects the inference package — a
+ * backend change forces a model reload, same as a `quant` change.
  */
 export const SessionConfigSchema = z.object({
   quant: z.enum(['fp8w8a8', 'intw8a8']).optional(),
+  engine_backend: EngineBackendSchema.optional(),
   scene_authoring: z.boolean(),
   action_logging: z.boolean(),
   video_recording: z.boolean(),

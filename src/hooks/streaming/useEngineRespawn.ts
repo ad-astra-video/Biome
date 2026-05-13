@@ -1,78 +1,104 @@
 import { useEffect, useRef } from 'react'
-import { ENGINE_MODES, type EngineMode } from '../../types/settings'
+import { ENGINE_MODES, type Settings } from '../../types/settings'
+import { pathsThatDiffer } from '../../utils/settingsClassifier'
 import type { PortalState } from '../../context/portal/portalStateMachine'
 import type { TranslatableError } from '../../i18n'
+import type { LifecycleState } from '../../context/engineLifecycle/engineLifecycleContextValue'
 import { createLogger } from '../../utils/logger'
 
 const log = createLogger('Streaming/Respawn')
 
-/** Watches the two settings that take effect at server-process spawn
- *  time — `engine_mode` (local-vs-remote process) and `offline_mode`
- *  (env vars injected when uv spawns the Python server) — and forces a
- *  full teardown-and-reconnect when either flips mid-stream. The env
- *  is only honoured when the process starts, so a hot toggle would
- *  otherwise leave the server running with stale environment.
+/** Watches for `process`-class settings changes — fields whose effects
+ *  only take hold when the server process is (re)spawned: `engine_mode`
+ *  (local-vs-remote process), `offline_mode` (env vars injected at uv
+ *  spawn time), and `server_url` (target host). `SETTING_CLASSES` in
+ *  `types/settings.ts` is the single source of truth for which fields
+ *  belong here.
  *
- *  Offline-mode changes only matter in standalone mode; in remote-server
- *  mode the env vars don't apply (we connect to a server we didn't
- *  spawn). The first render establishes the baseline without firing. */
+ *  When any of them flips mid-stream we tear down: close the WS, kick
+ *  off an atomic `restartServer` (no-op in remote-server mode — there's
+ *  no process we own), clear the engine error, and bounce back through
+ *  LOADING. The first render establishes the baseline without firing. */
 export function useEngineRespawn(opts: {
-  engineMode: EngineMode
-  offlineMode: boolean
+  settings: Settings
   portalState: PortalState
   mainMenuState: PortalState
   loadingState: PortalState
-  isServerRunning: boolean
+  isStandaloneMode: boolean
   disconnect: () => void
-  stopServer: () => Promise<string>
+  restartServer: () => Promise<LifecycleState>
   setEngineError: (err: TranslatableError | null) => void
   transitionTo: (state: PortalState) => void
 }): void {
   const {
-    engineMode,
-    offlineMode,
+    settings,
     portalState,
     mainMenuState,
     loadingState,
-    isServerRunning,
+    isStandaloneMode,
     disconnect,
-    stopServer,
+    restartServer,
     setEngineError,
     transitionTo
   } = opts
 
-  const prevEngineModeRef = useRef(engineMode)
-  const prevOfflineModeRef = useRef(offlineMode)
+  const prevSettingsRef = useRef<Settings | null>(null)
 
   useEffect(() => {
-    const prevMode = prevEngineModeRef.current
-    const prevOffline = prevOfflineModeRef.current
-    prevEngineModeRef.current = engineMode
-    prevOfflineModeRef.current = offlineMode
+    const prev = prevSettingsRef.current
+    prevSettingsRef.current = settings
+    if (!prev) return // baseline on first render
 
-    const engineModeChanged = !!prevMode && prevMode !== engineMode
-    const offlineChanged = prevOffline !== offlineMode && engineMode === ENGINE_MODES.STANDALONE
-
-    if (!engineModeChanged && !offlineChanged) return
+    const changed = pathsThatDiffer(prev, settings, 'process')
+    if (changed.length === 0) return
     if (portalState === mainMenuState) return
 
-    log.info(`Respawn: engine_mode ${prevMode}->${engineMode}, offline ${prevOffline}->${offlineMode}`)
-
-    disconnect()
-    if (isServerRunning) {
-      stopServer().catch((err) => log.error('Failed to stop server during respawn:', err))
+    // `offline_mode` only takes effect when we own the server process; in
+    // remote-server mode the env vars don't apply, so a hot toggle there is
+    // a no-op. Derive the "only offline_mode flipped" check from the
+    // changed-paths set so a future process-class field falls into the
+    // respawn branch by default instead of being silently swallowed here.
+    if (changed.length === 1 && changed[0] === 'offline_mode' && settings.engine_mode !== ENGINE_MODES.STANDALONE) {
+      return
     }
-    setEngineError(null)
-    transitionTo(loadingState)
+
+    // `engine_mode` flips are already handled by the lifecycle's own
+    // `isStandaloneMode`-keyed orchestration effect, which stops or
+    // spawns the local server as appropriate. Firing `restartServer`
+    // here too would race that pipeline (both go through `runExclusive`
+    // so it's serialised, not corrupting, but the second one is
+    // redundant and confusing in logs). Tear down the WS and trust
+    // the orchestration effect to settle the lifecycle.
+    const engineModeChanged = changed.includes('engine_mode')
+
+    log.info('Process-class settings changed - respawning', { changed })
+
+    // Tear down WS first, then atomically restart the standalone
+    // server (no-op in server mode, and skipped on engine_mode flips
+    // — the lifecycle's own orchestration effect handles those).
+    // Awaiting `restartServer` before transitioning to LOADING is
+    // important: the lifecycle state must be `ready` against the new
+    // process before warm-connect's `ensureReady` returns, otherwise
+    // warm-connect attaches to the doomed-or-dead old process.
+    void (async () => {
+      disconnect()
+      if (isStandaloneMode && !engineModeChanged) {
+        const final = await restartServer()
+        if (final.kind !== 'ready') {
+          log.error('restartServer failed during respawn:', final.kind)
+        }
+      }
+      setEngineError(null)
+      transitionTo(loadingState)
+    })()
   }, [
-    engineMode,
-    offlineMode,
+    settings,
     portalState,
     mainMenuState,
     loadingState,
-    isServerRunning,
+    isStandaloneMode,
     disconnect,
-    stopServer,
+    restartServer,
     setEngineError,
     transitionTo
   ])

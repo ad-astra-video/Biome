@@ -41,7 +41,7 @@ const zh = {
         },
         connectionLost: {
           title: '连接已断开',
-          description: '与 World Engine 的连接已丢失。要尝试重新连接吗？'
+          description: '与引擎的连接已丢失。要尝试重新连接吗？'
         },
         install: {
           title: '安装',
@@ -93,6 +93,10 @@ const zh = {
         serverOwnManaged: {
           title: '这是 Biome 的内置服务器',
           description: '它只在独立模式下运行。请切换回独立模式，或指向独立运行的服务器。'
+        },
+        incompatibleModel: {
+          title: '不兼容的模型',
+          description: '所选模型无法在该后端上加载。请切换后端或选择其他模型。'
         }
       },
       startup: {
@@ -154,8 +158,8 @@ const zh = {
           system: '跟随系统'
         },
         engineMode: {
-          title: '引擎模式',
-          description: '你希望如何运行模型？在 Biome 内运行，还是在别处运行？',
+          title: '模式',
+          description: '引擎在哪里运行？在 Biome 内，还是在别处？',
           standalone: '独立模式',
           server: '服务器'
         },
@@ -169,9 +173,9 @@ const zh = {
           ownManaged: 'Biome 的内置服务器',
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: '世界引擎',
-          description: '运行会话的引擎 ·',
+        engine: {
+          title: '本地引擎',
+          description: '引擎状态如何？ ·',
           ready: '就绪',
           starting: '启动中...',
           notInstalled: '未安装',
@@ -181,13 +185,13 @@ const zh = {
           reinstall: '重新安装',
           fixInPlace: '原地修复',
           totalReinstall: '全部重装',
-          notInstalledTooltip: '安装世界引擎以更改此项',
-          startingTooltip: '等待世界引擎启动完成',
-          failedTooltip: '修复世界引擎以更改此项',
+          notInstalledTooltip: '安装引擎以更改此项',
+          startingTooltip: '等待引擎启动完成',
+          failedTooltip: '修复引擎以更改此项',
           viewLogs: '查看日志'
         },
         performance: {
-          title: '性能设置',
+          title: '性能',
           description: '想要调整模型的性能吗？',
           quantization: '量化',
           quantizationDescription:
@@ -200,12 +204,27 @@ const zh = {
           fp8w8a8: 'FP8 W8A8',
           intw8a8: 'INT8 W8A8'
         },
+        engineBackend: {
+          world_engine: 'World Engine',
+          quark: 'Quark'
+        },
+        simulation: {
+          title: '模拟',
+          description: '什么来模拟你的世界？',
+          worldModel: '世界模型',
+          worldModelDescription: '模拟你的世界。请选择你的系统能够运行的最新、最大的模型。',
+          backend: '后端',
+          backendDescription: '运行世界模型。World Engine 是默认选项；Quark 为实验性后端，支持 macOS。'
+        },
         worldModel: {
-          title: '世界模型',
-          description: '要使用哪个 Overworld 模型来模拟你的世界？',
           download: '下载',
           couldNotLoadModelList: '无法加载模型列表',
-          deleteLocalCache: '删除模型'
+          deleteLocalCache: '删除模型',
+          custom: '自定义...',
+          modelNotFound: '未找到模型',
+          checking: '检查中...',
+          couldNotCheckModel: '无法检查模型',
+          removeFromList: '从列表中移除'
         },
         volume: {
           title: '音量',
@@ -412,7 +431,7 @@ const zh = {
       },
       startup: {
         begin: '正在初始化...',
-        world_engine_manager: '正在准备世界引擎...',
+        world_engine_manager: '正在准备引擎...',
         safety_checker: '正在加载内容过滤器...',
         safety_ready: '内容过滤器已就绪。',
         ready: '已准备好加载模型。'

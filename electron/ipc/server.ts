@@ -19,6 +19,8 @@ import { parseLogLine } from '../lib/logRecord.js'
 import { getLogger } from '../lib/logger.js'
 import { emitToAllWindows } from '../lib/ipcUtils.js'
 import { getOfflineEnv } from './settings.js'
+import type { ServerHealthResult } from '../../src/types/ipc.js'
+import { ServerCapabilitiesSchema } from '../../src/types/protocol.generated.js'
 
 const log = getLogger('engine.server')
 
@@ -232,43 +234,77 @@ export function registerServerIpc(): void {
 
   // Probe a Biome server's /health endpoint.
   //
-  //   - `reachable` mirrors the previous boolean return — true on 2xx, false
-  //     on any error / non-OK response.
-  //   - `launched_from_standalone` is the server's `launched_from_standalone`
-  //     flag (set when Electron spawns the server in standalone mode). The
-  //     settings panel uses it to refuse a server-mode URL that resolves to
-  //     any standalone-managed server, since saving that pairing invites the
-  //     next mode switch to tear the server down underneath the user.
-  ipcMain.handle('probe-server-health', async (_event, healthUrl: string, timeoutMs?: number) => {
-    const timeout = Math.max(500, Math.min(10000, Number(timeoutMs ?? 2500)))
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeout)
+  //   - `ok` mirrors reachability — true on 2xx, false on any error or
+  //     non-OK response.
+  //   - `capabilities` is parsed through the codegen'd
+  //     `ServerCapabilitiesSchema` so the option lists the server can
+  //     report stay in lockstep with the Pydantic source. Missing /
+  //     malformed / empty-axis capabilities degrade to `ok: true`
+  //     without `capabilities`, and the renderer falls back to its
+  //     client-side platform prediction.
+  //   - `launched_from_standalone` is the server's own
+  //     `launched_from_standalone` flag (set when Electron spawns the
+  //     server in standalone mode). The settings panel uses it to refuse
+  //     a server-mode URL that resolves to any standalone-managed
+  //     server, since saving that pairing invites the next mode switch
+  //     to tear the server down underneath the user.
+  ipcMain.handle(
+    'probe-server-health',
+    async (_event, healthUrl: string, timeoutMs?: number): Promise<ServerHealthResult> => {
+      const timeout = Math.max(500, Math.min(10000, Number(timeoutMs ?? 2500)))
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeout)
 
-    try {
-      const response = await fetch(healthUrl, {
-        method: 'GET',
-        signal: controller.signal
-      })
-      if (!response.ok) return { reachable: false, launched_from_standalone: false }
-
-      // Mark local managed server ready only when the probe matches our running local server.
       try {
-        const parsed = new URL(healthUrl)
-        const parsedPort = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80))
-        const state = getServerState()
-        if (state.process && state.port === parsedPort && isLocalhost(parsed.hostname)) {
-          setServerReady()
-        }
-      } catch {
-        // Ignore URL parse issues for readiness marking; the rest of the response is still useful.
-      }
+        const response = await fetch(healthUrl, {
+          method: 'GET',
+          signal: controller.signal
+        })
+        if (!response.ok) return { ok: false, launched_from_standalone: false }
 
-      const body = (await response.json()) as { launched_from_standalone?: boolean }
-      return { reachable: true, launched_from_standalone: body.launched_from_standalone === true }
-    } catch {
-      return { reachable: false, launched_from_standalone: false }
-    } finally {
-      clearTimeout(timer)
+        // Mark local managed server ready only when probe matches the running local server.
+        try {
+          const parsed = new URL(healthUrl)
+          const parsedPort = Number(parsed.port || (parsed.protocol === 'https:' ? 443 : 80))
+          const state = getServerState()
+          if (state.process && state.port === parsedPort && isLocalhost(parsed.hostname)) {
+            setServerReady()
+          }
+        } catch {
+          // Ignore URL parse issues for readiness marking; fetch result is still returned.
+        }
+
+        try {
+          const body = (await response.json()) as {
+            capabilities?: unknown
+            launched_from_standalone?: boolean
+          }
+          const launchedFromStandalone = body.launched_from_standalone === true
+          const parsed = ServerCapabilitiesSchema.safeParse(body.capabilities)
+          // Each backend the server advertises must carry at least one
+          // honourable quant; a half-populated matrix is worse than none
+          // since the renderer can't tell which backend got dropped.
+          const hasUsableMatrix =
+            parsed.success &&
+            parsed.data.backends.length > 0 &&
+            parsed.data.backends.every((b) => (parsed.data.quants[b] ?? []).length > 0)
+          if (hasUsableMatrix) {
+            return {
+              ok: true,
+              capabilities: parsed.data,
+              launched_from_standalone: launchedFromStandalone
+            }
+          }
+          return { ok: true, launched_from_standalone: launchedFromStandalone }
+        } catch {
+          // Non-fatal — server reachable, body unparseable.
+        }
+        return { ok: true, launched_from_standalone: false }
+      } catch {
+        return { ok: false, launched_from_standalone: false }
+      } finally {
+        clearTimeout(timer)
+      }
     }
-  })
+  )
 }

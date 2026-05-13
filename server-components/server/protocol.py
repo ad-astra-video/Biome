@@ -125,6 +125,26 @@ _FrozenStrict = ConfigDict(frozen=True, extra="forbid")
 _FrozenLenient = ConfigDict(frozen=True, extra="ignore")
 
 
+# Wire-level enums for the engine-config axes the server reports through
+# `ServerCapabilities`. Modelled as `StrEnum` (not bare Literal aliases)
+# so the codegen ships them as standalone Zod schemas — the renderer
+# imports `EngineBackendSchema` / `QuantSchema` and reads `.options` for
+# the value tuple, which means the renderer-side `ENGINE_BACKEND_OPTIONS`
+# / `QUANT_OPTIONS` arrays in `src/types/settings.ts` are derived rather
+# than re-declared. Adding a value: edit one enum, regenerate, every
+# consumer (Pydantic field types, manager helpers, settings schema,
+# UI dropdowns) picks it up.
+class EngineBackend(StrEnum):
+    WORLD_ENGINE = "world_engine"
+    QUARK = "quark"
+
+
+class Quant(StrEnum):
+    NONE = "none"
+    FP8W8A8 = "fp8w8a8"
+    INTW8A8 = "intw8a8"
+
+
 class SystemInfo(BaseModel):
     """Static hardware/runtime identity, snapshot once at startup."""
 
@@ -150,6 +170,42 @@ class ErrorSnapshot(BaseModel):
     vram_used_bytes: int | None = None
     vram_reserved_bytes: int | None = None
     gpu_util_percent: int | None = None
+
+
+class ServerCapabilities(BaseModel):
+    """Per-config support sets the server can honour, surfaced through
+    `/health` so the renderer can clamp its in-flight selections to
+    options that will actually run. The server is the source of truth —
+    anywhere the renderer has a dropdown that maps to a wire-level
+    config, this is the canonical set to filter against. Client-side
+    platform guesses are wrong in server mode where the remote may be
+    on a different platform than the client.
+
+    `quants` is keyed by `EngineBackend` because the supported quant
+    set genuinely differs across backends on the same host:
+
+      - CUDA + `world_engine`: all three modes (`none`, `fp8w8a8`,
+        `intw8a8`).
+      - CUDA + `quark`: `none` and `fp8w8a8`. Quark's CUDA path does
+        not implement INT8 weight-only quantisation today.
+      - Apple Silicon + `quark`: `none` only — `quark.EngineMetal`
+        internally forces all-bf16 (no native fp8 in MSL, no int8
+        KV path), so anything else is silently overridden. (Apple
+        Silicon doesn't offer `world_engine` at all — the legacy
+        package is CUDA-only.)
+
+    The dict only contains entries for backends in `backends`; the
+    renderer indexes by the in-flight backend selection so the quant
+    dropdown reacts instantly to a backend toggle without a save +
+    reconnect round-trip. Surfaced through HTTP rather than WS (lives
+    in `routes.HealthResponse`), but kept here so the codegen mirrors
+    it to a Zod schema + TS type the renderer reuses for both shape
+    parsing and the connection slice."""
+
+    model_config = _FrozenStrict
+
+    backends: list[EngineBackend]
+    quants: dict[EngineBackend, list[Quant]]
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -208,11 +264,13 @@ class SessionConfig(BaseModel):
     server compares against the running session and reconfigures the
     deltas. `quant` is the only nullable field: `None` means "no
     quantization" (the renderer maps its `'none'` UI sentinel to null
-    on the wire)."""
+    on the wire). `engine_backend` selects the inference package — a
+    backend change forces a model reload, same as a `quant` change."""
 
     model_config = _FrozenStrict
 
-    quant: Literal["fp8w8a8", "intw8a8"] | None = None
+    quant: Literal[Quant.FP8W8A8, Quant.INTW8A8] | None = None
+    engine_backend: EngineBackend = EngineBackend.WORLD_ENGINE
     scene_authoring: bool
     action_logging: bool
     video_recording: bool

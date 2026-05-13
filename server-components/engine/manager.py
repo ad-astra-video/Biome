@@ -9,7 +9,9 @@ import asyncio
 import base64
 import contextlib
 import gc
+import importlib
 import io
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,7 +20,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812  -- canonical alias used throughout the PyTorch ecosystem
 from PIL import Image
-from world_engine import CtrlInput, WorldEngine
 
 try:
     import simplejpeg
@@ -28,10 +29,74 @@ except ImportError:
 import structlog
 
 from engine import devices
-from engine.devices import WORLD_ENGINE_DEVICE
-from server.protocol import StageId
+from engine.devices import IS_DARWIN_ARM64, WORLD_ENGINE_DEVICE
+from server.protocol import EngineBackend, Quant, ServerCapabilities, StageId
 
 logger = structlog.stdlib.get_logger(__name__)
+
+
+# ============================================================================
+# Backend selection
+# ============================================================================
+
+
+# `EngineBackend` / `Quant` and the matching `ENGINE_BACKENDS` / `QUANTS`
+# value tuples live in `server.protocol` — the wire schema is the source
+# of truth, and `supported_capabilities` below derives its full-set
+# branches from those tuples so a new option lands in one place.
+#
+# `quark` routes through `quark.Engine` (CUDA + Apple — quark's
+# `Engine.__new__` factory dispatches to `EngineCUDA` or `EngineMetal`
+# based on platform). `world_engine` uses the legacy upstream
+# `world_engine` package (CUDA only); on Apple Silicon the renderer
+# must pick `quark` since legacy `world_engine` doesn't import there.
+def supported_capabilities() -> ServerCapabilities:
+    """Resolve the server's capability matrix from the running host's
+    platform. Used by the `/health` endpoint. The shape itself lives
+    in `server.protocol` so the codegen ships a matching Zod schema
+    + TS type to the renderer; the resolution logic stays here next
+    to the platform query.
+
+    The branches are keyed on `IS_DARWIN_ARM64` rather than
+    `WORLD_ENGINE_DEVICE`-as-proxy so the intent is explicit: this is
+    a *platform* gate (Apple Silicon vs. everything else), not a device
+    gate. A CPU-only Linux/Windows host falls through to the CUDA
+    branch — its capabilities are still the CUDA set even though the
+    actual load will fail when no GPU is present, which is the right
+    failure mode (the renderer offers the real options; load_engine
+    surfaces the no-GPU error).
+
+    Per-backend asymmetry on CUDA: `quark` doesn't currently implement
+    INT8 weight-only quantisation on the CUDA path, so it advertises
+    `none` + `fp8w8a8` only. `world_engine` keeps the full set. The
+    `ServerCapabilities` docstring is the canonical reference for the
+    matrix — keep both in sync if the support story changes."""
+    if IS_DARWIN_ARM64:
+        return ServerCapabilities(
+            backends=[EngineBackend.QUARK],
+            quants={EngineBackend.QUARK: [Quant.NONE]},
+        )
+    return ServerCapabilities(
+        backends=list(EngineBackend),
+        quants={
+            EngineBackend.WORLD_ENGINE: list(Quant),
+            EngineBackend.QUARK: [Quant.NONE, Quant.FP8W8A8],
+        },
+    )
+
+
+def _resolve_backend(backend: EngineBackend) -> tuple[type, type]:
+    """Lazy-import the chosen backend's ``WorldEngine`` and ``CtrlInput``
+    classes. Both packages export the same surface (`WorldEngine`-like
+    factory + `CtrlInput` dataclass), so the rest of the manager stays
+    backend-agnostic — only the import target differs."""
+    if backend == "quark":
+        mod = importlib.import_module("quark")
+        return mod.Engine, mod.CtrlInput
+    if backend == "world_engine":
+        mod = importlib.import_module("world_engine")
+        return mod.WorldEngine, mod.CtrlInput
+    raise UnsupportedBackendError(backend)
 
 
 # ============================================================================
@@ -47,6 +112,25 @@ DEFAULT_INFERENCE_FPS = 60
 # signal rather than a `[1/3]` substring buried in the message text.
 LOAD_ENGINE_TOTAL_STEPS = 3  # 1: load model, 2: seed frame, 3: ready
 WARMUP_TOTAL_STEPS = 3  # 1: reset, 2: append seed, 3: generate first frame
+
+# Biome's wire-level `Quant` → quark's `Engine(quant=...)` literal.
+# world_engine accepts the wire enum directly; quark only speaks
+# `"fp8"` / `"bf16"` / None, so the load path translates through this
+# table just before constructing the engine. `None` covers the
+# "no quant arg passed" path so the explicit-None branch falls through
+# cleanly into quark's all-bf16 default. `Quant.INTW8A8` is omitted
+# deliberately — `supported_capabilities()` doesn't advertise it for
+# quark, so a missing key here means the capability filter was bypassed.
+# Keys are typed `str | None` (rather than `Quant | None`) because
+# `load_engine` carries the user-supplied quant as `str | None` end-to-
+# end — the dict literal still uses `Quant.*` members for self-
+# documenting source, which are themselves `str` at runtime via
+# `StrEnum`.
+_QUARK_QUANT_MAP: dict[str | None, str | None] = {
+    None: None,
+    Quant.NONE: None,
+    Quant.FP8W8A8: "fp8",
+}
 
 
 class QuantUnsupportedError(RuntimeError):
@@ -89,6 +173,30 @@ class UnsupportedModelTypeError(RuntimeError):
         self.model_type = model_type
         self.supported = supported
         super().__init__(f"Unsupported model_type {model_type!r}; supported: {', '.join(supported)}")
+
+
+class UnsupportedBackendError(ValueError):
+    """Raised when `load_engine` is called with a backend identifier that
+    isn't one of the wire-protocol values (`'world_engine'` / `'quark'`).
+    The renderer's enum and `SessionConfig.engine_backend` already pin the
+    set; this is the server-side last line of defence."""
+
+    def __init__(self, backend: object) -> None:
+        super().__init__(f"Unsupported engine backend {backend!r}; expected 'world_engine' or 'quark'")
+
+
+class QuarkUnsupportedQuantError(ValueError):
+    """Raised when `load_engine(backend='quark', quant=…)` is invoked with
+    a quant that `_QUARK_QUANT_MAP` has no translation for. Means
+    `supported_capabilities()` advertised a quant the quark column
+    doesn't actually implement — i.e. the capability filter was bypassed
+    and the bug is in the matrix, not at the call site."""
+
+    def __init__(self, requested_quant: str | None) -> None:
+        super().__init__(
+            f"quark backend does not support quant {requested_quant!r}; "
+            "capability filter should have rejected this upstream"
+        )
 
 
 @dataclass(frozen=True)
@@ -172,6 +280,15 @@ class WorldEngineManager:
         self.original_seed_frame = None  # Preserved across scene edits for U-key reset
         self.model_uri: str | None = None
         self.quant: str | None = None
+        # Active backend (`'world_engine'` / `'quark'`) and the resolved
+        # classes from that package. Both populated by `load_engine`; a
+        # backend change forces a reload (the delta-check in `handle_init`
+        # treats it identically to a model-URI or quant change). The
+        # ``_ctrl_input_cls`` is what `warmup` uses to construct the
+        # zero-input control struct without re-importing per call.
+        self.backend: EngineBackend | None = None
+        self._engine_cls: type | None = None
+        self._ctrl_input_cls: type | None = None
         self.engine_warmed_up = False
         self._progress_callback = None
         self._progress_loop = None
@@ -191,10 +308,15 @@ class WorldEngineManager:
             raise EngineNotLoadedError
         return self.model_config
 
-    def _require_engine(self) -> WorldEngine:
+    def _require_engine(self):
         if self._engine is None:
             raise EngineNotLoadedError
         return self._engine
+
+    def _require_ctrl_input_cls(self) -> type:
+        if self._ctrl_input_cls is None:
+            raise EngineNotLoadedError
+        return self._ctrl_input_cls
 
     @property
     def n_frames(self) -> int:
@@ -284,6 +406,11 @@ class WorldEngineManager:
         self.model_config = None
         self.seed_frame = None
         self.engine_warmed_up = False
+        # Resolved backend classes are kept across unload — they're
+        # stateless module attributes and re-importing them on every
+        # backend-unchanged reload would cost a few hundred ms for no
+        # benefit. `load_engine` overwrites them when the backend
+        # actually changes.
         self._free_device_memory_sync()
 
     def _load_seed_from_file_sync(self, file_path: str) -> torch.Tensor | None:
@@ -335,23 +462,37 @@ class WorldEngineManager:
         """Load a seed frame from base64 encoded data (async wrapper)."""
         return await self._run_on_device_thread(lambda: self._load_seed_from_base64_sync(base64_data))
 
-    async def load_engine(self, model_uri: str, quant: str | None = None):
+    async def load_engine(
+        self,
+        model_uri: str,
+        quant: str | None = None,
+        backend: EngineBackend = EngineBackend.WORLD_ENGINE,
+    ):
         """Initialize or switch the WorldEngine model.
 
         model_uri is required — the server does not have a default model.
-        The client must always specify which model to load.
+        The client must always specify which model to load. ``backend``
+        selects the inference package; a backend change forces a reload
+        even if the model URI and quant are unchanged.
         """
         if not model_uri or not model_uri.strip():
             raise ModelUriRequiredError
         async with self._model_load_lock:
             requested_model = model_uri.strip()
             requested_quant = quant or None  # Normalize empty string to None
+            requested_backend: EngineBackend = backend
 
             model_unchanged = requested_model == self.model_uri
             quant_unchanged = requested_quant == self.quant
+            backend_unchanged = requested_backend == self.backend
 
-            if self._engine is not None and model_unchanged and quant_unchanged:
-                logger.info("Model already loaded", model=requested_model, quant=self.quant)
+            if self._engine is not None and model_unchanged and quant_unchanged and backend_unchanged:
+                logger.info(
+                    "Model already loaded",
+                    model=requested_model,
+                    quant=self.quant,
+                    backend=self.backend,
+                )
                 return
 
             if self._engine is not None:
@@ -359,6 +500,8 @@ class WorldEngineManager:
                     logger.info("Switching model", from_model=self.model_uri, to_model=requested_model)
                 if not quant_unchanged:
                     logger.info("Switching quant", from_quant=self.quant, to_quant=requested_quant)
+                if not backend_unchanged:
+                    logger.info("Switching backend", from_backend=self.backend, to_backend=requested_backend)
                 self._log_device_memory("before unload")
                 await self._run_on_device_thread(self._unload_engine_sync)
                 self._log_device_memory("after unload")
@@ -369,6 +512,19 @@ class WorldEngineManager:
             await self._run_on_device_thread(self._free_device_memory_sync)
             self._log_device_memory("after pre-load cleanup")
 
+            # Resolve backend classes lazily so the chosen package is
+            # only imported when actually used. Re-resolves on first
+            # load and whenever the backend changes — `_resolve_backend`
+            # itself is a cheap `importlib.import_module` lookup, but
+            # the real cost is the first import of `quark` or
+            # `world_engine` which triggers torch / coremltools / etc.
+            # eager imports.
+            if not backend_unchanged or self._engine_cls is None:
+                engine_cls, ctrl_input_cls = _resolve_backend(requested_backend)
+                self._engine_cls = engine_cls
+                self._ctrl_input_cls = ctrl_input_cls
+            engine_cls = self._engine_cls
+
             self._report_progress(StageId.SESSION_LOADING_MODEL)
             logger.info(
                 "Loading model",
@@ -376,25 +532,61 @@ class WorldEngineManager:
                 total_steps=LOAD_ENGINE_TOTAL_STEPS,
                 model=requested_model,
                 quant=requested_quant,
+                backend=requested_backend,
                 device=WORLD_ENGINE_DEVICE,
             )
 
             model_start = time.perf_counter()
-            dtype_attempts = [torch.bfloat16, torch.float16]
             new_engine = None
             last_error = None
             selected_dtype = None
 
+            # Backend-specific extra kwargs. ``taehv_cache_dir`` is a
+            # quark-only kwarg: quark.taehv pulls pre-built CoreML
+            # ``.mlpackage`` artifacts from HF on first use and
+            # materialises them under ``cache_dir``. Pointing it at a
+            # Biome-owned path (via ``BIOME_TAEHV_CACHE_DIR``, set by
+            # Electron) keeps every TAEHV byte under app control on
+            # Apple; quark CUDA ignores it. The legacy world_engine
+            # path doesn't accept it at all, so it's gated on the
+            # active backend. The shared kwargs (``device``, ``quant``,
+            # ``dtype``) are accepted identically by both backends —
+            # quark's Metal subclass internally forces ``quant`` to
+            # all-bf16 (no native fp8 in MSL) and treats ``device`` as
+            # informational, so passing the CUDA-shaped args through
+            # is safe.
+            backend_kwargs: dict[str, object] = {}
+            if requested_backend == "quark":
+                backend_kwargs["taehv_cache_dir"] = os.environ.get("BIOME_TAEHV_CACHE_DIR") or None
+
+            # Translate Biome's wire-level Quant enum into the literal each
+            # backend's `Engine(...)` accepts. world_engine takes the
+            # `fp8w8a8` / `intw8a8` / `none` strings directly; quark only
+            # speaks `"fp8"` / `"bf16"` / None (None falls through to its
+            # all-bf16 default). `Quant.INTW8A8` is filtered out of the
+            # quark column by `supported_capabilities()` upstream, so an
+            # unmapped value here means the filter was bypassed.
+            backend_quant: str | None
+            if requested_backend == "quark":
+                try:
+                    backend_quant = _QUARK_QUANT_MAP[requested_quant]
+                except KeyError as e:
+                    raise QuarkUnsupportedQuantError(requested_quant) from e
+            else:
+                backend_quant = requested_quant
+
+            dtype_attempts = [torch.bfloat16, torch.float16]
             for dtype in dtype_attempts:
                 try:
-                    logger.info("Attempting load", dtype=str(dtype))
+                    logger.info("Attempting load", backend=requested_backend, dtype=str(dtype))
 
-                    def _create_engine(dtype=dtype):
-                        return WorldEngine(
+                    def _create_engine(dtype=dtype, cls=engine_cls):
+                        return cls(
                             requested_model,
                             device=WORLD_ENGINE_DEVICE,
-                            quant=requested_quant,
+                            quant=backend_quant,
                             dtype=dtype,
+                            **backend_kwargs,
                         )
 
                     new_engine = await self._run_on_device_thread(_create_engine)
@@ -409,7 +601,7 @@ class WorldEngineManager:
                     )
                     await self._run_on_device_thread(self._unload_engine_sync)
                     self._log_device_memory("after OOM cleanup")
-                except Exception as e:  # noqa: BLE001  -- WorldEngine init can raise from torch / HF / world_engine; we capture and re-raise below
+                except Exception as e:  # noqa: BLE001  -- engine init can raise from torch / HF / coremltools / Metal-cpp / world_engine; capture and re-raise below
                     last_error = e
                     # Clear partially-allocated model state after failed initialization.
                     await self._run_on_device_thread(self._unload_engine_sync)
@@ -445,6 +637,7 @@ class WorldEngineManager:
 
             self.model_uri = requested_model
             self.quant = requested_quant
+            self.backend = requested_backend
 
             # Keep any existing seed frame. Server-side set_model flow explicitly clears
             # seed_frame when a new seed is required after a model switch.
@@ -621,6 +814,7 @@ class WorldEngineManager:
         callers translate that into a typed `MessageId.QUANT_UNSUPPORTED_GPU`.
         Other runtime errors propagate as-is."""
         engine = self._require_engine()
+        ctrl_input_cls = self._require_ctrl_input_cls()
         if self.seed_frame is None:
             raise SeedFrameNotSetError
         seed = self.seed_frame
@@ -651,7 +845,7 @@ class WorldEngineManager:
 
             self._report_progress(StageId.SESSION_WARMUP_COMPILE)
             gen_start = time.perf_counter()
-            _ = engine.gen_frame(ctrl=CtrlInput(button=set(), mouse=(0.0, 0.0)))
+            _ = engine.gen_frame(ctrl=ctrl_input_cls(button=set(), mouse=(0.0, 0.0)))
             log.info(
                 "First frame generated",
                 current_step=3,

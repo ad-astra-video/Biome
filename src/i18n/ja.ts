@@ -42,7 +42,7 @@ const ja = {
         },
         connectionLost: {
           title: '接続が切断されました',
-          description: 'World Engine との接続が失われました。再接続しますか？'
+          description: 'エンジンとの接続が失われました。再接続しますか？'
         },
         install: {
           title: 'インストール',
@@ -99,6 +99,11 @@ const ja = {
           title: 'Biome の組み込みサーバーです',
           description:
             'スタンドアロンモードでのみ動作します。スタンドアロンモードに戻すか、独立したサーバーを指定してください。'
+        },
+        incompatibleModel: {
+          title: '互換性のないモデル',
+          description:
+            '選択されたモデルはこのバックエンドでは読み込めません。バックエンドを切り替えるか、別のモデルを選択してください。'
         }
       },
       startup: {
@@ -161,8 +166,8 @@ const ja = {
           system: 'システム設定'
         },
         engineMode: {
-          title: 'エンジンモード',
-          description: 'モデルをどこで動かしますか？ Biome 内ですか、それとも外部ですか？',
+          title: 'モード',
+          description: 'エンジンをどこで動かしますか？ Biome 内ですか、それとも外部ですか？',
           standalone: 'スタンドアロン',
           server: 'サーバー'
         },
@@ -176,9 +181,9 @@ const ja = {
           ownManaged: 'Biome の組み込みサーバー',
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'ワールドエンジン',
-          description: 'セッションを実行するエンジン ·',
+        engine: {
+          title: 'ローカルエンジン',
+          description: 'エンジンの調子は？ ·',
           ready: '準備完了',
           starting: '起動中...',
           notInstalled: '未インストール',
@@ -189,13 +194,13 @@ const ja = {
           reinstall: '再インストール',
           fixInPlace: 'その場で修復',
           totalReinstall: '完全再インストール',
-          notInstalledTooltip: '変更するにはワールドエンジンをインストールしてください',
-          startingTooltip: 'ワールドエンジンの起動が完了するまでお待ちください',
-          failedTooltip: '変更するにはワールドエンジンを修復してください',
+          notInstalledTooltip: '変更するにはエンジンをインストールしてください',
+          startingTooltip: 'エンジンの起動が完了するまでお待ちください',
+          failedTooltip: '変更するにはエンジンを修復してください',
           viewLogs: 'ログを表示'
         },
         performance: {
-          title: 'パフォーマンス設定',
+          title: 'パフォーマンス',
           description: 'モデルのパフォーマンスを調整しますか？',
           quantization: '量子化',
           quantizationDescription:
@@ -209,12 +214,29 @@ const ja = {
           fp8w8a8: 'FP8 W8A8',
           intw8a8: 'INT8 W8A8'
         },
+        engineBackend: {
+          world_engine: 'World Engine',
+          quark: 'Quark'
+        },
+        simulation: {
+          title: 'シミュレーション',
+          description: '何があなたの世界をシミュレートしますか？',
+          worldModel: 'ワールドモデル',
+          worldModelDescription:
+            'あなたの世界をシミュレートします。お使いのシステムで動作する範囲で、最も新しく最も大きいモデルを選んでください。',
+          backend: 'バックエンド',
+          backendDescription:
+            'ワールドモデルを実行します。既定は World Engine。Quark は実験的なバックエンドで、macOS にも対応しています。'
+        },
         worldModel: {
-          title: 'ワールドモデル',
-          description: 'どの Overworld モデルで世界をシミュレートしますか？',
           download: 'ダウンロード',
           couldNotLoadModelList: 'モデル一覧を読み込めませんでした',
-          deleteLocalCache: 'モデルを削除'
+          deleteLocalCache: 'モデルを削除',
+          custom: 'カスタム...',
+          modelNotFound: 'モデルが見つかりません',
+          checking: '確認中...',
+          couldNotCheckModel: 'モデルを確認できませんでした',
+          removeFromList: 'リストから削除'
         },
         volume: {
           title: '音量',
@@ -428,7 +450,7 @@ const ja = {
       },
       startup: {
         begin: '初期化しています...',
-        world_engine_manager: 'ワールドエンジンを準備しています...',
+        world_engine_manager: 'エンジンを準備しています...',
         safety_checker: 'コンテンツフィルターを読み込んでいます...',
         safety_ready: 'コンテンツフィルターの準備ができました。',
         ready: 'モデルを読み込む準備ができました。'

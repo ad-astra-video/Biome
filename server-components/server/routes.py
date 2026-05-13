@@ -39,15 +39,29 @@ import structlog
 import yaml
 from fastapi import APIRouter, Depends, Request, WebSocket, WebSocketDisconnect
 from huggingface_hub import constants as hf_constants
-from huggingface_hub import get_collection, scan_cache_dir, try_to_load_from_cache
+from huggingface_hub import (
+    get_collection,
+    hf_hub_download,  # pyright: ignore[reportUnknownVariableType]  -- partial stubs for the `dry_run` overload bleed `Unknown` through
+    scan_cache_dir,
+    try_to_load_from_cache,
+)
 from huggingface_hub import model_info as hf_model_info
 from huggingface_hub.utils import GatedRepoError, RepositoryNotFoundError
 from pydantic import BaseModel
 from structlog.contextvars import bound_contextvars
 
 from engine import Engines
+from engine.manager import ServerCapabilities, supported_capabilities
 from server.caches import TtlCache
-from server.protocol import PROTOCOL_VERSION, MessageId, StageId, SystemInfo, SystemInfoMessage, rpc_ok
+from server.protocol import (
+    PROTOCOL_VERSION,
+    EngineBackend,
+    MessageId,
+    StageId,
+    SystemInfo,
+    SystemInfoMessage,
+    rpc_ok,
+)
 from server.session.connection import Connection
 from server.session.handlers import build_init_response_data, prepare_session, run_preinit_handshake
 from server.session.workers import run_session
@@ -76,13 +90,16 @@ class SafetyHealth(BaseModel):
 
 class HealthResponse(BaseModel):
     """Body of `GET /health`. The renderer uses this to gate "engine ready"
-    UI; the frontend checks reachability via the request itself, so the
-    response shape is for the engine-status panel only."""
+    UI and to clamp dropdowns (backend, quant) against what the server
+    can actually run; the frontend checks reachability via the request
+    itself, so the response shape is for the engine-status panel +
+    `ServerCapabilities` only."""
 
     status: Literal["ok"] = "ok"
     startup_complete: bool
     world_engine: WorldEngineHealth
     safety: SafetyHealth
+    capabilities: ServerCapabilities
     # True when this server was launched by a Biome instance running in
     # standalone mode (via `--launched-from-standalone`). The renderer
     # uses this in remote-server mode to refuse a URL that points to
@@ -97,11 +114,43 @@ class PickerModel(BaseModel):
     single authority for what models the user can choose: the curated
     Waypoint collection plus whatever's locally cached, with size and
     cache-presence baked in. The renderer never talks to HuggingFace
-    directly."""
+    directly.
+
+    `model_type` is the `model_type:` field from the repo's
+    ``config.yaml`` — used by the renderer to validate the saved
+    model id against the in-flight backend selection (quark only
+    supports `waypoint-1.5`). `None` means the lookup failed (offline,
+    HF outage, malformed config); the renderer treats it as
+    backend-agnostic so a degraded path doesn't lock out the picker."""
 
     id: str
     size_bytes: int | None
     is_local: bool
+    model_type: str | None = None
+
+
+class ModelInfoResponse(BaseModel):
+    """Body of `GET /api/model-info/{model_id}`. Mirrors the `ModelInfo`
+    TS type in `src/types/ipc.ts`. Used by the renderer to validate a
+    user-typed custom model id against HuggingFace before pinning it
+    into the picker — the curated `/api/models` route only knows about
+    repos in the Waypoint collection plus the local cache, so anything
+    else has to round-trip through here for a yes/no on existence,
+    a size estimate, and whether the repo is already cached locally
+    (so the picker can show the cache-delete affordance on custom
+    rows the same as it does on curated ones).
+
+    `exists` carries the yes/no; `error` is the user-facing reason
+    when something's off (gated repo, not found, transient HF failure).
+    Transient failures are returned with `exists=True` so the renderer
+    doesn't lock the user out for a flaky network — they're free to
+    retry."""
+
+    id: str
+    size_bytes: int | None
+    exists: bool
+    is_local: bool
+    error: str | None
 
 
 # Internal cache value; not exposed on a route. Carries the raw size
@@ -132,6 +181,22 @@ DEFAULT_WORLD_ENGINE_MODEL = "Overworld/Waypoint-1.5-1B"
 # carry this field at all — those are admitted via collection
 # membership, hence the OR semantics below.
 WAYPOINT_MODEL_TYPES: set[str] = {"waypoint-1", "waypoint-1.5"}
+
+# Per-backend support matrix used by the `/api/models?backend=…` filter.
+# `None` is the in-band sentinel for "universal" — the backend accepts
+# any Waypoint variant we'd surface in the picker, including collection
+# entries whose `config.yaml` is missing `model_type:` (treated as
+# trusted-by-curation). A `set[str]` restricts to the listed types and
+# strict-drops unknowns that originate from the curated collection.
+#
+# `world_engine` is universal: the legacy loader handles every Waypoint
+# variant we ship. `quark` is restrictive: it only implements the
+# wp-1.5 path today and raises NotImplementedError on wp-1 configs
+# (no TAEHV VAE, different scheduler shape).
+COMPATIBLE_MODEL_TYPES_BY_BACKEND: dict[EngineBackend, set[str] | None] = {
+    EngineBackend.WORLD_ENGINE: None,
+    EngineBackend.QUARK: {"waypoint-1.5"},
+}
 
 # Filename patterns excluded from "world-engine model size" calculations.
 # Repos bundle a diffusers-format VAE under `vae/` whose weights are a
@@ -190,6 +255,16 @@ def get_waypoint_models_cache(request: Request) -> TtlCache[str, list[str]]:
     return cache
 
 
+def get_model_type_cache(request: Request) -> TtlCache[str, str]:
+    cache: TtlCache[str, str] = request.app.state.model_type_cache
+    return cache
+
+
+def get_model_info_cache(request: Request) -> TtlCache[str, "ModelInfoResponse"]:
+    cache: TtlCache[str, ModelInfoResponse] = request.app.state.model_info_cache
+    return cache
+
+
 # ============================================================================
 # HTTP Endpoints
 # ============================================================================
@@ -211,48 +286,58 @@ async def health(request: Request, startup: Annotated[ServerStartup, Depends(get
             has_seed=we is not None and we.seed_frame is not None,
         ),
         safety=SafetyHealth(loaded=engines is not None),
+        capabilities=supported_capabilities(),
         launched_from_standalone=launched_from_standalone,
     )
 
 
-def _is_cached_waypoint_model(repo_id: str) -> bool:
-    """True if the repo's cached `config.yaml` declares a Waypoint
-    `model_type`. Used to admit non-collection cached repos into the
-    picker — Waypoint variants the user trained / downloaded outside
-    the curated collection. Returns False on any read / parse failure
-    (the repo just falls back to "must be in the collection")."""
-    try:
-        path = try_to_load_from_cache(repo_id, "config.yaml")
-    except Exception:  # noqa: BLE001  -- try_to_load_from_cache can raise on OS-level cache issues; treat as "not waypoint"
-        return False
-    if not isinstance(path, str):
-        return False
+def _read_model_type(path: str) -> str | None:
+    """Parse `model_type` out of a local `config.yaml`. Returns `None`
+    on any read / parse failure or when the field is missing / wrong
+    type. Used by both the cache-side admission check and the HF
+    fallback in `_resolve_model_type`."""
     try:
         with open(path, encoding="utf-8") as f:
             config: object = yaml.safe_load(f)
     except (OSError, yaml.YAMLError):
-        return False
+        return None
     if not isinstance(config, dict):
-        return False
+        return None
     model_type = cast("object", config.get("model_type"))  # pyright: ignore[reportUnknownMemberType]  -- yaml.safe_load is Any-typed
-    return isinstance(model_type, str) and model_type in WAYPOINT_MODEL_TYPES
+    return model_type if isinstance(model_type, str) else None
 
 
-def _scan_cache() -> tuple[dict[str, int], set[str]]:
+def _cached_model_type(repo_id: str) -> str | None:
+    """`model_type` from the repo's locally-cached `config.yaml`, or
+    `None` if no cached copy exists / the file is unreadable. Used by
+    `_scan_cache` to admit waypoint-shaped cached repos into the picker
+    without re-fetching from HF."""
+    try:
+        path = try_to_load_from_cache(repo_id, "config.yaml")
+    except Exception:  # noqa: BLE001  -- try_to_load_from_cache can raise on OS-level cache issues; treat as "no cached config"
+        return None
+    if not isinstance(path, str):
+        return None
+    return _read_model_type(path)
+
+
+def _scan_cache() -> tuple[dict[str, int], dict[str, str]]:
     """Scan the local HF hub cache. Returns `(cached_sizes,
-    waypoint_shaped_repos)` where `cached_sizes` maps every cached
-    model repo's id to its world-engine model size in bytes (the
-    safetensors weight files, mirroring `_resolve_model_size`'s filter
-    so on-disk and HF-derived sizes agree), and the second set filters
-    that to the subset whose `config.yaml` declares a Waypoint
-    `model_type`. Both empty on scan failure; never raises."""
+    waypoint_model_types)`. `cached_sizes` maps every cached model
+    repo's id to its world-engine model size in bytes (safetensors
+    weight files, mirroring `_resolve_model_size`'s filter so on-disk
+    and HF-derived sizes agree). `waypoint_model_types` is the subset
+    of cached repos whose `config.yaml` declares a Waypoint
+    `model_type`, mapped to that string — the picker uses the value
+    for per-backend compatibility filtering. Both empty on scan
+    failure; never raises."""
     try:
         info = scan_cache_dir()
     except Exception as e:  # noqa: BLE001  -- scan_cache_dir raises a wide grab-bag (CacheNotFound, OSError); soft-fall to empty
         logger.warning(f"scan_cache_dir failed: {e}")
-        return {}, set()
+        return {}, {}
     cached_sizes: dict[str, int] = {}
-    waypoint_ids: set[str] = set()
+    waypoint_model_types: dict[str, str] = {}
     for repo in info.repos:
         if repo.repo_type != "model":
             continue
@@ -269,10 +354,38 @@ def _scan_cache() -> tuple[dict[str, int], set[str]]:
                     continue
                 seen_blobs.add(f.blob_path)
                 total += f.size_on_disk
+        # A repo with no weight files isn't actually usable — most often
+        # this is a config-only directory left behind by `_resolve_model_type`'s
+        # `hf_hub_download(filename="config.yaml")` call. Treating it as
+        # cached would surface a 0-byte "local" row in the picker. Drop
+        # it; the picker falls back to the HF size lookup and shows it
+        # as a downloadable entry.
+        if total == 0:
+            continue
         cached_sizes[repo.repo_id] = total
-        if _is_cached_waypoint_model(repo.repo_id):
-            waypoint_ids.add(repo.repo_id)
-    return cached_sizes, waypoint_ids
+        mt = _cached_model_type(repo.repo_id)
+        if mt is not None and mt in WAYPOINT_MODEL_TYPES:
+            waypoint_model_types[repo.repo_id] = mt
+    return cached_sizes, waypoint_model_types
+
+
+def _resolve_model_type(model_id: str) -> str | None:
+    """`model_type` for `model_id`, fetched on demand for non-cached
+    collection entries. Tries the local HF cache first; falls back to
+    downloading `config.yaml` (small file, ~1KB) via `hf_hub_download`.
+    Returns `None` on any failure — the picker treats `None` as
+    backend-agnostic so a degraded path doesn't hide rows entirely."""
+    local = _cached_model_type(model_id)
+    if local is not None:
+        return local
+    try:
+        path = hf_hub_download(repo_id=model_id, filename="config.yaml")
+    except (GatedRepoError, RepositoryNotFoundError):
+        return None
+    except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall
+        logger.warning(f"config.yaml fetch failed for {model_id}: {e}")
+        return None
+    return _read_model_type(path)
 
 
 def _resolve_model_size(model_id: str) -> ModelSize:
@@ -307,12 +420,28 @@ def _resolve_model_size(model_id: str) -> ModelSize:
 
 
 async def _get_size(model_id: str, cache: TtlCache[str, ModelSize]) -> ModelSize:
-    cached = cache.get(model_id)
-    if cached is not None:
-        return cached
-    size = await asyncio.to_thread(_resolve_model_size, model_id)
-    cache.set(model_id, size)
-    return size
+    return await cache.get_or_fetch(model_id, lambda: asyncio.to_thread(_resolve_model_size, model_id))
+
+
+# Sentinel used to distinguish "TTL cache holds a real `None` (lookup
+# failed)" from "cache miss". `TtlCache.get` already returns `None` for
+# missing entries, so we can't store `None` directly — the cache stores
+# the sentinel string instead, and `_get_model_type` translates it back
+# at the API boundary.
+_MODEL_TYPE_UNKNOWN = "__unknown__"
+
+
+async def _get_model_type(model_id: str, cache: TtlCache[str, str]) -> str | None:
+    """TTL-cached wrapper around `_resolve_model_type`. Stores the
+    sentinel `_MODEL_TYPE_UNKNOWN` for resolution failures so the
+    cache hit distinguishes "tried and couldn't resolve" from miss."""
+
+    async def fetcher() -> str:
+        resolved = await asyncio.to_thread(_resolve_model_type, model_id)
+        return resolved if resolved is not None else _MODEL_TYPE_UNKNOWN
+
+    result = await cache.get_or_fetch(model_id, fetcher)
+    return None if result == _MODEL_TYPE_UNKNOWN else result
 
 
 async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
@@ -320,30 +449,28 @@ async def _fetch_waypoint_ids(cache: TtlCache[str, list[str]]) -> list[str]:
     default model alone on any error so the picker is never empty; only
     successful fetches are cached, so a transient HF outage doesn't pin
     the picker at the default for the full TTL."""
-    cached = cache.get(WAYPOINT_COLLECTION_SLUG)
-    if cached is not None:
-        return cached
 
-    def _fetch() -> list[str] | None:
-        try:
+    async def fetcher() -> list[str]:
+        def _fetch() -> list[str]:
             collection = get_collection(WAYPOINT_COLLECTION_SLUG)
-        except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall to the default
-            logger.warning(f"waypoint collection fetch failed: {e}")
-            return None
-        return [item.item_id for item in collection.items if item.item_type == "model"]
+            return [item.item_id for item in collection.items if item.item_type == "model"]
 
-    fetched = await asyncio.to_thread(_fetch)
-    if fetched is None:
+        fetched = await asyncio.to_thread(_fetch)
+        return fetched or [DEFAULT_WORLD_ENGINE_MODEL]
+
+    try:
+        return await cache.get_or_fetch(WAYPOINT_COLLECTION_SLUG, fetcher)
+    except Exception as e:  # noqa: BLE001  -- HF client raises a wide grab-bag (HTTP/auth/cache); soft-fall and don't cache
+        logger.warning(f"waypoint collection fetch failed: {e}")
         return [DEFAULT_WORLD_ENGINE_MODEL]
-    result = fetched or [DEFAULT_WORLD_ENGINE_MODEL]
-    cache.set(WAYPOINT_COLLECTION_SLUG, result)
-    return result
 
 
 @router.get("/api/models")
 async def list_models(
     size_cache: Annotated[TtlCache[str, ModelSize], Depends(get_model_size_cache)],
     waypoint_cache: Annotated[TtlCache[str, list[str]], Depends(get_waypoint_models_cache)],
+    model_type_cache: Annotated[TtlCache[str, str], Depends(get_model_type_cache)],
+    backend: EngineBackend | None = None,
 ) -> list[PickerModel]:
     """Canonical world-model picker list.
 
@@ -352,22 +479,32 @@ async def list_models(
       - cached repos whose `config.yaml` declares a Waypoint `model_type`
         (admits dev variants the user trained outside the collection)
 
-    Each entry carries its size and a cache-presence flag. The renderer
+    Each entry carries its size, cache-presence flag, and resolved
+    `model_type` so the renderer can surface a "this model needs a
+    different backend" message even for ids that survived the
+    server-side filter via the `None` (unknown) sentinel. The renderer
     consumes this list directly — no client-side HuggingFace lookups,
     no separate availability / sizing round-trips, no manual "type a
     custom id" path. Non-world-model cache entries (safety classifier,
     scene-authoring image generators, etc.) coexist in the same HF
     cache root and are deliberately excluded.
 
+    When `backend` is supplied, rows whose `model_type` is known and
+    incompatible with that backend are dropped (`quark` → only
+    `waypoint-1.5`; `world_engine` → the full Waypoint set). Rows
+    whose `model_type` couldn't be resolved (offline / HF outage /
+    malformed config) pass through — better to show a row that fails
+    at load than to hide it silently.
+
     Sort order: cached models first, then the rest alphabetically by id;
     stable so the picker doesn't reshuffle between renders. The HF size
-    lookup per id is TTL-cached; the cache scan is fresh on every call
-    so a just-deleted model disappears immediately."""
-    cached_sizes, waypoint_cached_ids = await asyncio.to_thread(_scan_cache)
+    and model_type lookups per id are TTL-cached; the cache scan is
+    fresh on every call so a just-deleted model disappears immediately."""
+    cached_sizes, waypoint_cached_model_types = await asyncio.to_thread(_scan_cache)
     waypoint_collection_ids = set(await _fetch_waypoint_ids(waypoint_cache))
 
     picker_ids = sorted(
-        waypoint_collection_ids | waypoint_cached_ids,
+        waypoint_collection_ids | set(waypoint_cached_model_types),
         key=lambda i: (i not in cached_sizes, i.lower()),
     )
 
@@ -380,14 +517,129 @@ async def list_models(
     fetched_sizes = await asyncio.gather(*(_get_size(id_, size_cache) for id_ in not_cached))
     hf_sizes = dict(zip(not_cached, (s.size_bytes for s in fetched_sizes), strict=True))
 
+    # Model-type lookup: cached repos already resolved during the
+    # scan; collection-only entries get an on-demand HF fetch
+    # (TTL-cached). Runs in parallel with the size fetches above on
+    # cache miss; both are HF metadata round-trips that benefit from
+    # interleaving.
+    not_cached_locally = [id_ for id_ in picker_ids if id_ not in waypoint_cached_model_types]
+    fetched_types = await asyncio.gather(*(_get_model_type(id_, model_type_cache) for id_ in not_cached_locally))
+    hf_model_types = dict(zip(not_cached_locally, fetched_types, strict=True))
+
+    def _model_type(id_: str) -> str | None:
+        return waypoint_cached_model_types.get(id_) or hf_model_types.get(id_)
+
+    compatible_types = COMPATIBLE_MODEL_TYPES_BY_BACKEND.get(backend) if backend is not None else None
+
+    def _is_compatible(id_: str) -> bool:
+        """Decide whether to surface `id_` for the in-flight backend.
+
+        Behaviour:
+          - no backend requested, or the requested backend is universal
+            (compat set is `None`) → always show
+          - resolved `model_type` is in the backend's compat set → show
+          - resolved `model_type` is outside the compat set → drop
+          - `model_type` couldn't be resolved AND the repo is in the
+            curated `Overworld/waypoint` collection → drop, on the
+            theory that a missing `model_type:` field on a collection
+            entry is a curation gap and surfacing it would just fail
+            at load time on a restrictive backend
+          - `model_type` couldn't be resolved AND the repo is user-
+            provided (cached locally but outside the collection) →
+            pass through; we don't presume to classify third-party /
+            dev variants
+        """
+        if compatible_types is None:
+            return True
+        mt = _model_type(id_)
+        if mt is None:
+            return id_ not in waypoint_collection_ids
+        return mt in compatible_types
+
     return [
         PickerModel(
             id=id_,
             size_bytes=cached_sizes[id_] if id_ in cached_sizes else hf_sizes.get(id_),
             is_local=id_ in cached_sizes,
+            model_type=_model_type(id_),
         )
         for id_ in picker_ids
+        if _is_compatible(id_)
     ]
+
+
+@router.get("/api/model-info/{model_id:path}")
+async def get_model_info(
+    model_id: str,
+    cache: Annotated[TtlCache[str, ModelInfoResponse], Depends(get_model_info_cache)],
+) -> ModelInfoResponse:
+    """Validate a user-typed custom model id against HuggingFace.
+
+    Used by the settings panel's "custom model" affordance: the user
+    types a repo id, we check that it exists, gate or no-gate, and
+    report back a size estimate so the picker can show it alongside
+    the curated entries. `/api/models` is the canonical list for the
+    Waypoint collection + local cache; anything outside that has to
+    round-trip through here for the existence yes/no.
+
+    Stable error states (gated, not-found) are cached so a repeated
+    settings-panel open doesn't burn HF requests on the same bad id.
+    Transient failures aren't cached — those should retry naturally.
+    Sizes mirror `_resolve_model_size`'s filter (safetensors-only,
+    diffusers VAE excluded) so a custom row's size aligns with the
+    curated rows on the same picker."""
+
+    # Targeted cache probe — `try_to_load_from_cache` returning a string
+    # path (vs `None` / the `_CACHED_NO_EXIST` sentinel) is the
+    # huggingface_hub-blessed way to ask "is this repo's config.yaml
+    # actually present on disk" without a full `scan_cache_dir` walk.
+    # We treat the presence of the config as the repo being cached,
+    # mirroring the membership rule `_scan_cache` uses.
+    def _is_locally_cached() -> bool:
+        try:
+            path = try_to_load_from_cache(model_id, "config.yaml")
+        except Exception:  # noqa: BLE001  -- OS-level cache issues; treat as "not cached"
+            return False
+        return isinstance(path, str)
+
+    def _fetch_sync() -> ModelInfoResponse:
+        try:
+            info = hf_model_info(model_id, files_metadata=True)
+        except GatedRepoError:
+            return ModelInfoResponse(
+                id=model_id, size_bytes=None, exists=True, is_local=False, error="Private or gated model"
+            )
+        except RepositoryNotFoundError:
+            return ModelInfoResponse(
+                id=model_id, size_bytes=None, exists=False, is_local=False, error="Model not found"
+            )
+        size_bytes: int | None = None
+        if hasattr(info, "siblings") and info.siblings:
+            seen_blobs: set[str] = set()
+            for s in info.siblings:
+                if s.size is None or not _counts_toward_model_size(s.rfilename):
+                    continue
+                blob_key = getattr(s, "blob_id", None) or s.rfilename
+                if blob_key in seen_blobs:
+                    continue
+                seen_blobs.add(blob_key)
+                size_bytes = (size_bytes or 0) + s.size
+        return ModelInfoResponse(
+            id=model_id,
+            size_bytes=size_bytes,
+            exists=True,
+            is_local=_is_locally_cached(),
+            error=None,
+        )
+
+    try:
+        return await cache.get_or_fetch(model_id, lambda: asyncio.to_thread(_fetch_sync))
+    except Exception as e:  # noqa: BLE001  # pyright: ignore[reportUnusedExcept]  -- HF client raises a wide grab-bag (HTTPError/RequestException/HfHubHTTPError) that pyright's stubs don't model; fold them all into a soft response
+        logger.warning(f"model-info error for {model_id}: {e}")
+        # Transient — return without caching so the next call retries.
+        return ModelInfoResponse(
+            id=model_id, size_bytes=None, exists=True, is_local=False, error="Could not check model"
+        )
 
 
 @router.delete("/api/cached-model/{model_id:path}", status_code=204)

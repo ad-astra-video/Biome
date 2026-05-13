@@ -106,7 +106,7 @@ const AppShell = () => {
   // finishes coming up. Engine-dependent controls (model picker,
   // Launch click) gate on `lifecycleState.kind === 'ready'` rather than
   // hiding the menu chrome; settings surfaces the live phase via
-  // WorldEngineSection's status dot.
+  // EngineSection's status dot.
   const isLifecyclePreparing = lifecycleState.kind === 'preparing'
   useGamepadNavigation(isUIActive)
   const {
@@ -266,7 +266,7 @@ const AppShell = () => {
     // both paths port-scan + spawn, and the Electron-side single-server
     // guard would surface the conflict as an error if the second spawn
     // arrives before the first lands. Settings shows the live phase via
-    // WorldEngineSection's status dot; the user can wait or check there.
+    // EngineSection's status dot; the user can wait or check there.
     if (isLifecyclePreparing) return
     if (
       portalState === portalStates.MAIN_MENU &&

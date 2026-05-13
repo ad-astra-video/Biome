@@ -18,9 +18,12 @@ import { useInputLoop } from '../../hooks/streaming/useInputLoop'
 import { usePauseState } from '../../hooks/streaming/usePauseState'
 import { usePointerLock } from '../../hooks/streaming/usePointerLock'
 import { useSceneEdit } from '../../hooks/streaming/useSceneEdit'
+import { useClampedSettings } from '../../hooks/streaming/useClampedSettings'
 import { useSessionInit } from '../../hooks/streaming/useSessionInit'
 import { useStreamingLifecycle } from '../../hooks/streaming/useStreamingLifecycle'
 import { useWarmConnection } from '../../hooks/streaming/useWarmConnection'
+import { getSessionSignature } from '../../utils/settingsClassifier'
+import type { ServerCapabilities } from '../../types/ipc'
 import type { ConnectionContextValue } from './connection'
 import type { SessionContextValue } from './session'
 import type { FramesContextValue } from './frames'
@@ -36,9 +39,9 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const { state, states, transitionTo } = usePortal()
   const containerRef = useRef<HTMLDivElement | null>(null)
 
-  const { settings, isStandaloneMode, engineMode } = useSettings()
+  const { settings: rawSettings, isStandaloneMode, saveSettings } = useSettings()
   const lifecycle = useEngineLifecycle()
-  const { stopServer, isRunning: isServerRunning, check: checkEngineStatus, probeServerHealth } = lifecycle
+  const { check: checkEngineStatus, probeServerHealth, restartServer } = lifecycle
   const {
     status: connectionStatus,
     statusStage,
@@ -73,6 +76,21 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const sceneEdit = useSceneEdit()
   const [connectionLost, setConnectionLost] = useState(false)
   const [engineError, setEngineError] = useState<TranslatableError | null>(null)
+  // Server-reported capability matrix. Populated by the URL-validation
+  // probe in the settings panel and by the warm-flow probe before each
+  // session starts, so the backend / quant dropdowns filter against
+  // what the active server can actually run. Null until the first
+  // probe completes — dropdowns disable themselves in that window.
+  const [serverCapabilities, setServerCapabilities] = useState<ServerCapabilities | null>(null)
+
+  // Saved settings clamped against the server's matrix. Every consumer
+  // inside this provider reads `settings` (the effective view) rather
+  // than `rawSettings` so the wire config, the lifecycle signatures,
+  // and the persisted-on-disk values all see the same `engine_backend`
+  // / `engine_quant`. The hook also writes the clamped values back to
+  // disk on first divergence so menu opens don't keep surfacing the
+  // delta as a no-op restart prompt.
+  const settings = useClampedSettings(rawSettings, serverCapabilities, saveSettings)
 
   const {
     preConnectionStage,
@@ -91,7 +109,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     ensureReady: lifecycle.ensureReady,
     connect,
     clearWsLogs,
-    onServerError: setEngineError
+    onServerError: setEngineError,
+    onServerHealth: (result) => setServerCapabilities(result.capabilities ?? null)
   })
 
   // Loading-screen "First-time setup, takes 10-30 minutes" overlay flag.
@@ -108,22 +127,26 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   const isStreaming = state === states.STREAMING
   const inputEnabled = isStreaming && isReady && !isPaused && !settingsOpen && !connectionLost && !sceneEdit.isActive
 
-  // Check engine status on mount (for standalone mode)
+  // Refresh engine status on mount and whenever the user returns to
+  // the main menu in standalone mode. The lifecycle's auto-recovery
+  // effect compares `state.kind === 'ready'` against
+  // `engine.isServerRunning`; that comparison is only meaningful if
+  // `isServerRunning` is fresh, so we re-poll at the natural points
+  // where the user might next interact with settings or click Launch.
   useEffect(() => {
-    if (isStandaloneMode) {
-      checkEngineStatus()
-    }
-  }, [isStandaloneMode, checkEngineStatus])
+    if (!isStandaloneMode) return
+    if (state !== states.MAIN_MENU) return
+    void checkEngineStatus()
+  }, [isStandaloneMode, state, states.MAIN_MENU, checkEngineStatus])
 
   useEngineRespawn({
-    engineMode,
-    offlineMode: settings.offline_mode ?? false,
+    settings,
     portalState: state,
     mainMenuState: states.MAIN_MENU,
     loadingState: states.LOADING,
-    isServerRunning,
+    isStandaloneMode,
     disconnect,
-    stopServer,
+    restartServer,
     setEngineError,
     transitionTo
   })
@@ -135,13 +158,14 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     })
   }, [getSeedsDirPath])
 
-  const { selectSeed, lastAppliedModel, resetSession } = useSessionInit({
+  const { selectSeed, lastApplied, resetSession } = useSessionInit({
     portalState: state,
     loadingState: states.LOADING,
     isConnected: wsIsConnected(connectionStatus),
     isStreaming,
     isStandaloneMode,
     settings,
+    engineError,
     sendInit,
     applyInitResponse,
     setPlaceholderFrame
@@ -180,10 +204,27 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     loadingState: states.LOADING,
     connectionStatus,
     engineError,
-    isStandaloneMode,
-    isServerRunning,
-    stopServer
+    runWarmConnection
   })
+
+  // Clear `engineError` when a session-class setting changes while the
+  // engine-error overlay is up: the user is acting on the error and
+  // their save is implicit consent to retry. Bootstrap re-fires
+  // (engineError → null is a dep change in `useSessionInit`) against
+  // the still-warm server that `useLoadingFailureCleanup` cycled
+  // underneath. No-op when no error is in flight — same signature
+  // change in normal streaming flows through the lifecycle reducer's
+  // intentional-reconnect path instead.
+  const sessionSig = useMemo(() => getSessionSignature(settings), [settings])
+  const prevSessionSigRef = useRef(sessionSig)
+  useEffect(() => {
+    if (prevSessionSigRef.current === sessionSig) return
+    prevSessionSigRef.current = sessionSig
+    if (engineError) {
+      log.info('Session settings changed with engine-error overlay up - clearing for retry')
+      setEngineError(null)
+    }
+  }, [sessionSig, engineError])
 
   const resume = useCallback(() => {
     setSettingsOpen(false)
@@ -194,10 +235,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   useStreamingLifecycle({
     portalState: state,
     connectionStatus,
-    engineModel: settings?.engine_model,
-    engineQuant: settings.engine_quant,
-    sceneAuthoringEnabled: settings.scene_authoring_enabled,
-    lastAppliedModel,
+    settings,
+    lastApplied,
     engineError,
     hasReceivedFrame,
     // Init is considered complete once applyInitResponse has set the
@@ -209,7 +248,6 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
     isPaused,
     sceneEditActive: sceneEdit.graceActive,
     states,
-    settings,
     setEngineError,
     resetSession,
     runWarmConnection,
@@ -240,12 +278,9 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
 
   const { dismissConnectionLost, reconnectAfterConnectionLost, cancelConnection, prepareReturnToMainMenu } =
     useConnectionActions({
-      isStandaloneMode,
-      isServerRunning,
       cancelWarmFlow,
       disconnect,
       exitPointerLock,
-      stopServer,
       transitionTo,
       loadingState: states.LOADING,
       mainMenuState: states.MAIN_MENU,
@@ -269,6 +304,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       isUIActive: !inputEnabled,
       isFreshInstall,
       server,
+      serverCapabilities,
+      setServerCapabilities,
       dismissConnectionLost,
       reconnectAfterConnectionLost,
       cancelConnection,
@@ -285,6 +322,8 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
       inputEnabled,
       isFreshInstall,
       server,
+      serverCapabilities,
+      setServerCapabilities,
       dismissConnectionLost,
       reconnectAfterConnectionLost,
       cancelConnection,

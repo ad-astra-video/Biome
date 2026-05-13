@@ -1,6 +1,7 @@
 import { PORTAL_STATES, type PortalState } from '../portal/portalStateMachine'
 import type { ConnectionStatus } from '../../hooks/engine/useWebSocket'
 import type { TranslatableError, TranslationKey } from '../../i18n'
+import type { RestartSignatures } from '../../utils/settingsClassifier'
 
 const isActiveConnection = (s: ConnectionStatus): boolean =>
   s.kind === 'connecting' || s.kind === 'loading' || s.kind === 'ready'
@@ -10,6 +11,16 @@ export const STREAMING_LIFECYCLE_EVENT = {
   SYNC: 'sync'
 } as const
 
+/** Kinds of intentional restart the reducer tracks. `'reconnect'` is
+ *  the in-place version (session-class diff): the reducer emits
+ *  `startIntentionalReconnect` and orchestrates the disconnect →
+ *  LOADING transition. `'respawn'` is the heavier version
+ *  (process-class diff): `useEngineRespawn` lives outside the reducer
+ *  and owns the side effects (it has to, because `stopServer` is
+ *  async); the reducer only mirrors the intent so the
+ *  connection-lost overlay is suppressed during the disconnect. */
+export type IntentionalRestart = 'reconnect' | 'respawn'
+
 export type StreamingLifecycleEffects = {
   loadingFailureError: { transportError: TranslatableError } | { key: TranslationKey } | null
   connectionLost: boolean
@@ -17,7 +28,6 @@ export type StreamingLifecycleEffects = {
   engineErrorDismissed: boolean
   startIntentionalReconnect: boolean
   transitionToLoadingAfterIntentionalDisconnect: boolean
-  clearEngineErrorOnLoadingEntry: boolean
   runLoadingConnection: boolean
   transitionToStreaming: boolean
   teardownForInactivePortalState: boolean
@@ -34,7 +44,6 @@ const emptyEffects = (): StreamingLifecycleEffects => ({
   engineErrorDismissed: false,
   startIntentionalReconnect: false,
   transitionToLoadingAfterIntentionalDisconnect: false,
-  clearEngineErrorOnLoadingEntry: false,
   runLoadingConnection: false,
   transitionToStreaming: false,
   teardownForInactivePortalState: false,
@@ -49,7 +58,11 @@ export type StreamingLifecycleState = {
   wasConnectedInStreamingState: boolean
   connectionLostSignaled: boolean
   hadEngineError: boolean
-  intentionalReconnectInProgress: boolean
+  /** Which kind of intentional restart is in flight, if any.
+   *  Drives the connection-lost / warm-error suppression and (for
+   *  `'reconnect'`) the disconnect → LOADING orchestration. Cleared
+   *  on LOADING entry and on MAIN_MENU. */
+  intentionalRestart: IntentionalRestart | null
   loadingTransitionRequestedForIntentionalReconnect: boolean
   streamingTransitionRequested: boolean
   loadingConnectionRequestSeq: number
@@ -63,7 +76,7 @@ export const initialStreamingLifecycleState: StreamingLifecycleState = {
   wasConnectedInStreamingState: false,
   connectionLostSignaled: false,
   hadEngineError: false,
-  intentionalReconnectInProgress: false,
+  intentionalRestart: null,
   loadingTransitionRequestedForIntentionalReconnect: false,
   streamingTransitionRequested: false,
   loadingConnectionRequestSeq: 0,
@@ -75,8 +88,15 @@ export const initialStreamingLifecycleState: StreamingLifecycleState = {
 export type StreamingLifecycleSyncPayload = {
   portalState: PortalState
   connectionStatus: ConnectionStatus
-  selectedModel: string
-  lastAppliedModel: string | null
+  /** Current signatures of all restart-class settings. The reducer
+   *  doesn't care what's in them — only whether they differ from
+   *  `lastAppliedSignatures`. Built by `getRestartSignatures` in
+   *  `utils/settingsClassifier`. */
+  currentSignatures: RestartSignatures
+  /** Snapshot taken in `useSessionInit` at the last successful
+   *  bootstrap. `null` until the first session has been initialised
+   *  (or after a `resetSession`). */
+  lastAppliedSignatures: RestartSignatures | null
   engineError: TranslatableError | null
   hasReceivedFrame: boolean
   initCompleted: boolean
@@ -91,6 +111,25 @@ export type StreamingLifecycleEvent = {
   payload: StreamingLifecycleSyncPayload
 }
 
+/** Compute the strongest intentional-restart class implied by a
+ *  signature diff. `'respawn'` outranks `'reconnect'` because a
+ *  process-class change always implies a full session reset, and the
+ *  respawn path (stopServer + new env vars) subsumes the in-place
+ *  reconnect. Returns `null` when no diff is detected or when we're
+ *  not in a streaming-with-open-socket state where a restart makes
+ *  sense. */
+const computeIntentionalRestart = (
+  current: RestartSignatures,
+  lastApplied: RestartSignatures | null,
+  inStreamingState: boolean,
+  socketOpen: boolean
+): IntentionalRestart | null => {
+  if (!inStreamingState || !socketOpen || !lastApplied) return null
+  if (current.process !== lastApplied.process) return 'respawn'
+  if (current.session !== lastApplied.session) return 'reconnect'
+  return null
+}
+
 export const streamingLifecycleReducer = (
   state: StreamingLifecycleState,
   event: StreamingLifecycleEvent
@@ -100,8 +139,8 @@ export const streamingLifecycleReducer = (
   const {
     portalState,
     connectionStatus,
-    selectedModel,
-    lastAppliedModel,
+    currentSignatures,
+    lastAppliedSignatures,
     engineError,
     hasReceivedFrame,
     initCompleted,
@@ -123,28 +162,43 @@ export const streamingLifecycleReducer = (
   const socketOpen = connectionStatus.kind === 'loading' || connectionStatus.kind === 'ready'
   const socketReady = connectionStatus.kind === 'ready'
 
-  const shouldIntentionalReconnect = inStreamingState && socketOpen && selectedModel !== lastAppliedModel
+  const intentNeeded = computeIntentionalRestart(currentSignatures, lastAppliedSignatures, inStreamingState, socketOpen)
 
   const enteredLoading = inLoadingState && state.lastPortalState !== PORTAL_STATES.LOADING
   if (enteredLoading) {
     next.loadingConnectionRequestSeq = state.loadingConnectionRequestSeq + 1
     next.loadingAttempted = false
-    next.effects.clearEngineErrorOnLoadingEntry = true
+    // Clear any prior connection-lost overlay: by entering LOADING we're
+    // either healing from a real disconnect (user clicked reconnect) or
+    // intentionally tearing down (process respawn from useEngineRespawn,
+    // which lives outside this reducer and so can't go through the
+    // intentional-restart suppression path).
+    //
+    // `engineError` is *not* cleared here — every path that should clear
+    // it (cancelConnection, reconnectAfterConnectionLost, useEngineRespawn)
+    // does so explicitly before transitioning, and the recovery path
+    // (useLoadingFailureCleanup) deliberately preserves the overlay
+    // across the background respawn's LOADING re-entry.
+    next.connectionLostSignaled = false
+    next.effects.clearConnectionLost = true
     next.effects.runLoadingConnection = true
   }
 
-  if (shouldIntentionalReconnect && !next.intentionalReconnectInProgress) {
-    next.intentionalReconnectInProgress = true
-    next.loadingTransitionRequestedForIntentionalReconnect = false
-    next.effects.startIntentionalReconnect = true
+  if (intentNeeded && state.intentionalRestart !== intentNeeded) {
+    next.intentionalRestart = intentNeeded
+    if (intentNeeded === 'reconnect') {
+      next.loadingTransitionRequestedForIntentionalReconnect = false
+      next.effects.startIntentionalReconnect = true
+    }
+    // 'respawn' has no effect — useEngineRespawn owns the side effects.
   }
 
-  if (!next.intentionalReconnectInProgress) {
+  if (next.intentionalRestart !== 'reconnect') {
     next.loadingTransitionRequestedForIntentionalReconnect = false
   }
 
   if (
-    next.intentionalReconnectInProgress &&
+    next.intentionalRestart === 'reconnect' &&
     inStreamingState &&
     connectionStatus.kind === 'idle' &&
     !next.loadingTransitionRequestedForIntentionalReconnect
@@ -187,7 +241,15 @@ export const streamingLifecycleReducer = (
   }
 
   if (inLoadingState && next.loadingAttempted && isFailedConnection(connectionStatus)) {
-    if (next.intentionalReconnectInProgress) {
+    if (next.intentionalRestart !== null) {
+      next.effects.suppressedIntentionalWarmError = true
+    } else if (engineError) {
+      // The engine-error overlay is already up — fired by an
+      // application-layer error the server pushed before tearing down
+      // the WS. The transport-error overlay this branch would normally
+      // raise is redundant noise in that case; let the engine-error
+      // overlay carry the user-facing message and let the recovery
+      // path (useLoadingFailureCleanup) cycle the server underneath.
       next.effects.suppressedIntentionalWarmError = true
     } else {
       const transportError = connectionStatus.kind === 'error' ? connectionStatus.error : null
@@ -205,7 +267,7 @@ export const streamingLifecycleReducer = (
 
   if (next.wasConnectedInStreamingState && inStreamingState && isFailedConnection(connectionStatus)) {
     if (!next.connectionLostSignaled) {
-      if (next.intentionalReconnectInProgress) {
+      if (next.intentionalRestart !== null) {
         next.effects.suppressedIntentionalConnectionLost = true
       } else {
         next.effects.connectionLost = true
@@ -222,13 +284,13 @@ export const streamingLifecycleReducer = (
     next.loadingAttempted = false
     next.wasConnectedInStreamingState = false
     next.connectionLostSignaled = false
-    next.intentionalReconnectInProgress = false
+    next.intentionalRestart = null
     next.loadingTransitionRequestedForIntentionalReconnect = false
     next.effects.clearConnectionLost = true
   }
 
-  if (inLoadingState && socketOpen && next.intentionalReconnectInProgress) {
-    next.intentionalReconnectInProgress = false
+  if (inLoadingState && socketOpen && next.intentionalRestart !== null) {
+    next.intentionalRestart = null
     next.loadingTransitionRequestedForIntentionalReconnect = false
   }
 

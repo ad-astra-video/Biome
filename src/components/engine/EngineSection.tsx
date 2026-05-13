@@ -4,7 +4,7 @@ import { SETTINGS_MUTED_TEXT } from '../../styles'
 import SettingsSection from '../ui/SettingsSection'
 import SettingsButton from '../ui/SettingsButton'
 
-type WorldEngineSectionProps = {
+type EngineSectionProps = {
   /** Open the install-log modal so the user can watch progress while
    *  `reinstallEngine` runs. EngineTab owns the modal and the confirm
    *  flow that decides between `'fix'` and `'nuke'` modes. */
@@ -26,12 +26,12 @@ type WorldEngineSectionProps = {
  *
  *  The user can reach this view at any phase (the splash is dismissable
  *  by design now), so the dot acts as the at-a-glance state signal. */
-const WorldEngineSection = ({
+const EngineSection = ({
   onFixInPlaceClick,
   onTotalReinstallClick,
   onInstallClick,
   onViewStartupLogsClick
-}: WorldEngineSectionProps) => {
+}: EngineSectionProps) => {
   const { t } = useTranslation()
   const { state } = useEngineLifecycle()
 
@@ -70,28 +70,28 @@ const WorldEngineSection = ({
   const statusLabel = (() => {
     switch (state.kind) {
       case 'ready':
-        return t('app.settings.worldEngine.ready')
+        return t('app.settings.engine.ready')
       case 'preparing':
-        return t('app.settings.worldEngine.starting')
+        return t('app.settings.engine.starting')
       case 'not_installed':
-        return t('app.settings.worldEngine.notInstalled')
+        return t('app.settings.engine.notInstalled')
       case 'failed':
-        return t('app.settings.worldEngine.failed')
+        return t('app.settings.engine.failed')
     }
   })()
 
   return (
     <SettingsSection
-      title="app.settings.worldEngine.title"
+      title="app.settings.engine.title"
       rawDescription={
         <span className="inline-flex flex-wrap items-center gap-[0.71cqh]">
-          {t('app.settings.worldEngine.description')} {statusLabel}
+          {t('app.settings.engine.description')} {statusLabel}
           {dot}
           {state.kind === 'preparing' && (
             <>
               {'·'}
               <a className="cursor-pointer text-inherit underline" onClick={onViewStartupLogsClick}>
-                {t('app.settings.worldEngine.viewLogs')}
+                {t('app.settings.engine.viewLogs')}
               </a>
             </>
           )}
@@ -101,14 +101,10 @@ const WorldEngineSection = ({
       <div className="flex flex-col gap-[0.25cqh]">
         {state.kind === 'ready' && (
           <div className="flex justify-start gap-[1.2cqh]">
-            <SettingsButton
-              variant="secondary"
-              label="app.settings.worldEngine.fixInPlace"
-              onClick={onFixInPlaceClick}
-            />
+            <SettingsButton variant="secondary" label="app.settings.engine.fixInPlace" onClick={onFixInPlaceClick} />
             <SettingsButton
               variant="danger"
-              label="app.settings.worldEngine.totalReinstall"
+              label="app.settings.engine.totalReinstall"
               onClick={onTotalReinstallClick}
             />
           </div>
@@ -117,7 +113,7 @@ const WorldEngineSection = ({
           <>
             <SettingsButton
               variant="primary"
-              label="app.settings.worldEngine.install"
+              label="app.settings.engine.install"
               onClick={onInstallClick}
               className="w-full"
             />
@@ -127,7 +123,7 @@ const WorldEngineSection = ({
                 m-0
               `}
             >
-              {t('app.settings.worldEngine.notInstalledNote')}
+              {t('app.settings.engine.notInstalledNote')}
             </p>
           </>
         )}
@@ -135,7 +131,7 @@ const WorldEngineSection = ({
           <>
             <SettingsButton
               variant="primary"
-              label="app.settings.worldEngine.reinstall"
+              label="app.settings.engine.reinstall"
               onClick={onInstallClick}
               className="w-full"
             />
@@ -154,4 +150,4 @@ const WorldEngineSection = ({
   )
 }
 
-export default WorldEngineSection
+export default EngineSection

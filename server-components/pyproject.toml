@@ -20,15 +20,23 @@ dependencies = [
   "hf-xet==1.4.3",
   "timm==1.0.26",
   "py-cpuinfo==9.0.0",
-  "nvidia-ml-py==13.595.45",
+  "nvidia-ml-py==13.595.45; sys_platform != 'darwin'",
   "psutil==7.1.3",
   "simplejpeg==1.9.0",
   "accelerate==1.12.0",
-  "bitsandbytes==0.49.2",
-  "llama-cpp-python==0.3.36",
-  "gguf>=0.10.0",
+  "bitsandbytes==0.49.2; sys_platform != 'darwin'",
+  "llama-cpp-python==0.3.36; sys_platform != 'darwin'",
+  "gguf>=0.10.0; sys_platform != 'darwin'",
   "imageio-ffmpeg==0.6.0",
   "structlog==25.5.0",
+  # Quark inference backend, used on every platform. ``Engine`` is a
+  # drop-in for ``world_engine.WorldEngine`` / ``MLXWorldEngine`` and
+  # dispatches to ``EngineCUDA`` (Linux / Windows) or ``EngineMetal``
+  # (Apple Silicon) via its ``__new__`` factory. ``[engine]`` brings
+  # in torch / Pillow / PyYAML / einops + ``quark[taehv]``
+  # (coremltools + huggingface_hub) — all already transitively
+  # present in Biome's deps, no new top-level surface.
+  "quark[engine]",
 ]
 
 [dependency-groups]
@@ -39,6 +47,7 @@ index-strategy = "unsafe-best-match"
 environments = [
   "sys_platform == 'linux' and platform_machine == 'x86_64'",
   "sys_platform == 'win32' and platform_machine == 'AMD64'",
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 override-dependencies = [
   "triton==3.6.0; sys_platform == 'linux'",
@@ -46,12 +55,18 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+torch = [
+  { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+  { index = "pytorch-cu128", marker = "sys_platform != 'darwin'" },
+]
 llama-cpp-python = [
   { url = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.36-cu128-Basic-linux-20260416/llama_cpp_python-0.3.36%2Bcu128.basic-cp312-cp312-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
   { url = "https://github.com/JamePeng/llama-cpp-python/releases/download/v0.3.36-cu128-Basic-win-20260417/llama_cpp_python-0.3.36%2Bcu128.basic-cp312-cp312-win_amd64.whl", marker = "sys_platform == 'win32'" },
 ]
+# Pins to a commit on Quark main. Bump the rev to update.
+quark = { git = "https://github.com/Overworldai/quark.git", rev = "e2a14aab7c7ce47b40d412b0848ca9b202f6d9b3" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"

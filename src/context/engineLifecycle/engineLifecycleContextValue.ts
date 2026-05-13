@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { EngineStatus } from '../../types/app'
+import type { ServerHealthResult } from '../../types/ipc'
 
 /**
  * High-level state of the local-server lifecycle.
@@ -55,13 +56,12 @@ export type EngineLifecycleContextValue = {
   serverLogPath: string | null
   /** Re-poll Electron's `check-engine-status`. */
   check: () => Promise<EngineStatus | null>
-  /** Stop the running server. Used by mode-switch / loading-failure
-   *  teardown paths that want to kill the process without going through
-   *  a full reinstall. Idempotent — no-op when nothing's running. */
-  stopServer: () => Promise<string>
-  /** Probe a server's `/health` endpoint and return reachability. Used
-   *  by the warm-connect flow's pre-WS reachability check. */
-  probeServerHealth: (healthUrl: string, timeoutMs?: number) => Promise<boolean>
+  /** Probe a server's `/health` endpoint. Returns reachability (`ok`),
+   *  the server's `ServerCapabilities` payload when present, and the
+   *  `launched_from_standalone` flag the settings UI uses to refuse a
+   *  server-mode URL that points at a Biome-managed standalone. Used by
+   *  the warm-connect flow's pre-WS reachability check. */
+  probeServerHealth: (healthUrl: string, timeoutMs?: number) => Promise<ServerHealthResult>
 
   /** Stop the running server (if any), reinstall the engine deps, and
    *  start a fresh server.
@@ -71,7 +71,7 @@ export type EngineLifecycleContextValue = {
    *    - `'nuke'` → wipes the engine + UV directories first; expensive,
    *                 fixes stubborn cases that `'fix'` can't.
    *
-   *  Used by the WorldEngineSection install/reinstall buttons and as
+   *  Used by the EngineSection install/reinstall buttons and as
    *  the recovery path from `not_installed` / `failed`. The state moves
    *  through `preparing` for the duration and lands on `ready` (success)
    *  or `failed` (install or start broke). The resolved value is the
@@ -80,6 +80,18 @@ export type EngineLifecycleContextValue = {
    *  Concurrent calls coalesce — the second caller awaits the first's
    *  pipeline rather than starting a parallel install. */
   reinstallEngine: (mode?: 'fix' | 'nuke') => Promise<LifecycleState>
+  /** Atomic kill+spawn of the standalone server, against the already-
+   *  installed engine. Stops the running process (no-op if not
+   *  running), spawns a fresh one, polls `/health`, refreshes
+   *  `isRunning` / `serverLogPath`. The state moves through `preparing`
+   *  and lands on `ready` or `failed`. Concurrent calls coalesce
+   *  through the same pipeline lock as the other lifecycle methods.
+   *
+   *  The kill and spawn are deliberately fused into one verb: the rest
+   *  of the app relies on the standalone server being available for
+   *  `/health`, model picker, and capability probes, so exposing a
+   *  separate "stop" would invite breakage of that invariant. */
+  restartServer: () => Promise<LifecycleState>
   /** Wait until the server reaches a terminal state (`ready` or `failed`)
    *  and return that state.
    *

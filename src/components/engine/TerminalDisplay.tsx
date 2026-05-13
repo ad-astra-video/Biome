@@ -101,7 +101,8 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,
-        requestedQuant: settings.engine_quant ?? null
+        requestedQuant: settings.engine_quant ?? null,
+        requestedBackend: settings.engine_backend ?? null
       }
     })
   }, [
@@ -113,6 +114,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
     progressPercent,
     settings.engine_model,
     settings.engine_quant,
+    settings.engine_backend,
     statusStage
   ])
 

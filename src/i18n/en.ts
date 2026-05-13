@@ -41,7 +41,7 @@ const en = {
         },
         connectionLost: {
           title: 'Connection Lost',
-          description: 'The connection to the World Engine was lost. Would you like to try reconnecting?'
+          description: 'The connection to the engine was lost. Would you like to try reconnecting?'
         },
         install: {
           title: 'Installation',
@@ -99,10 +99,15 @@ const en = {
           title: "That's Biome's built-in server",
           description:
             'It only runs while Biome is in standalone mode. Switch back to standalone, or point at an independent server.'
+        },
+        incompatibleModel: {
+          title: 'Incompatible Model',
+          description:
+            "The selected model can't be loaded with this backend. Switch backend, or choose a different model."
         }
       },
       startup: {
-        startingEngine: 'Starting World Engine...'
+        startingEngine: 'Starting engine...'
       },
       loading: {
         error: 'Error',
@@ -162,8 +167,8 @@ const en = {
           system: 'System Default'
         },
         engineMode: {
-          title: 'Engine Mode',
-          description: 'how will you run the model? as part of Biome, or elsewhere?',
+          title: 'Mode',
+          description: 'where will the engine run? as part of Biome, or elsewhere?',
           standalone: 'Standalone',
           server: 'Server'
         },
@@ -177,9 +182,9 @@ const en = {
           ownManaged: "Biome's built-in server",
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'World Engine',
-          description: 'the engine that runs your sessions ·',
+        engine: {
+          title: 'Local Engine',
+          description: "how's the engine doing? ·",
           ready: 'ready',
           starting: 'starting...',
           notInstalled: 'not installed',
@@ -190,13 +195,13 @@ const en = {
           reinstall: 'Reinstall',
           fixInPlace: 'Fix In Place',
           totalReinstall: 'Total Reinstall',
-          notInstalledTooltip: 'Install World Engine to change this',
-          startingTooltip: 'Wait for World Engine to finish starting',
-          failedTooltip: 'Fix World Engine to change this',
+          notInstalledTooltip: 'Install the engine to change this',
+          startingTooltip: 'Wait for the engine to finish starting',
+          failedTooltip: 'Fix the engine to change this',
           viewLogs: 'view logs'
         },
         performance: {
-          title: 'Performance Settings',
+          title: 'Performance',
           description: "want to dial in the model's performance?",
           quantization: 'Quantization',
           quantizationDescription:
@@ -210,12 +215,28 @@ const en = {
           fp8w8a8: 'FP8 W8A8',
           intw8a8: 'INT8 W8A8'
         },
+        engineBackend: {
+          world_engine: 'World Engine',
+          quark: 'Quark'
+        },
+        simulation: {
+          title: 'Simulation',
+          description: 'what should simulate your world?',
+          worldModel: 'World Model',
+          worldModelDescription: 'Simulates your world. Pick the newest, largest one your system can handle.',
+          backend: 'Backend',
+          backendDescription:
+            'Runs the world model. World Engine is the default; Quark is experimental and supports macOS.'
+        },
         worldModel: {
-          title: 'World Model',
-          description: 'which Overworld model will simulate your world?',
           download: 'download',
           couldNotLoadModelList: 'Could not load model list',
-          deleteLocalCache: 'Delete the model'
+          deleteLocalCache: 'Delete the model',
+          custom: 'Custom...',
+          modelNotFound: 'Model not found',
+          checking: 'checking...',
+          couldNotCheckModel: 'Could not check model',
+          removeFromList: 'Remove from list'
         },
         volume: {
           title: 'Volume',
@@ -428,7 +449,7 @@ const en = {
       },
       startup: {
         begin: 'Initializing...',
-        world_engine_manager: 'Preparing world engine...',
+        world_engine_manager: 'Preparing engine...',
         safety_checker: 'Loading content filter...',
         safety_ready: 'Content filters ready.',
         ready: 'Ready to load model.'

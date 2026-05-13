@@ -39,10 +39,20 @@ const ConnectionLostOverlay = () => {
       session: {
         engineMode: isServerMode ? 'server' : 'standalone',
         requestedModel: settings.engine_model ?? null,
-        requestedQuant: settings.engine_quant ?? null
+        requestedQuant: settings.engine_quant ?? null,
+        requestedBackend: settings.engine_backend ?? null
       }
     })
-  }, [server, websocket.allLogs, errorDetail, statusStage, isServerMode, settings.engine_model, settings.engine_quant])
+  }, [
+    server,
+    websocket.allLogs,
+    errorDetail,
+    statusStage,
+    isServerMode,
+    settings.engine_model,
+    settings.engine_quant,
+    settings.engine_backend
+  ])
 
   return (
     <div

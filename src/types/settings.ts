@@ -1,14 +1,24 @@
 import { z } from 'zod'
 import { SUPPORTED_LOCALES } from '../i18n/locales'
+import { EngineBackendSchema, QuantSchema, type EngineBackend, type Quant } from './protocol.generated'
+import type { AllPaths } from '../utils/settingsClassifier'
 
 export const ENGINE_MODES = { STANDALONE: 'standalone', SERVER: 'server' } as const
 export const LOCALE_OPTIONS = ['system', ...SUPPORTED_LOCALES] as const
-export const QUANT_OPTIONS = ['none', 'fp8w8a8', 'intw8a8'] as const
-export type QuantOption = (typeof QUANT_OPTIONS)[number]
+
+// `EngineBackend` / `Quant` are the canonical wire enums defined in
+// `server.protocol`; the codegen ships them as Zod schemas, and we
+// derive the option tuples and types here so the renderer never
+// re-declares the values. Adding a new enum member: edit the StrEnum
+// in `protocol.py`, regenerate, every call site picks it up.
+export const ENGINE_BACKEND_OPTIONS = EngineBackendSchema.options
+export const QUANT_OPTIONS = QuantSchema.options
+export type { EngineBackend }
+export type QuantOption = Quant
 
 export type AppLocale = (typeof LOCALE_OPTIONS)[number]
 
-export const DEFAULT_WORLD_ENGINE_MODEL = 'Overworld/Waypoint-1.5-1B'
+export const DEFAULT_ENGINE_MODEL = 'Overworld/Waypoint-1.5-1B'
 
 // Port 7987 = 'O' (79) + 'W' (87) in ASCII
 export const STANDALONE_PORT = 7987
@@ -55,12 +65,24 @@ export const DEFAULT_AUDIO = {
   music_volume: 0.3
 } as const
 
+// Adding a field? Classify it in `SETTING_CLASSES` below if the server
+// cares — anything unlisted silently defaults to `'none'` (no restart on
+// change), which is the wrong default for any field that touches the
+// engine.
 export const settingsSchema = z.object({
   locale: z.enum(LOCALE_OPTIONS).default('system'),
   server_url: z.string().default(''),
   engine_mode: z.enum(['standalone', 'server']).default('standalone'),
-  engine_model: z.string().default(DEFAULT_WORLD_ENGINE_MODEL),
-  engine_quant: z.enum(QUANT_OPTIONS).default('none'),
+  engine_model: z.string().default(DEFAULT_ENGINE_MODEL),
+  // User-added custom HF repo ids that the picker should surface
+  // alongside the curated Waypoint collection. Local-only setting:
+  // not part of the wire protocol, just remembered between sessions
+  // so the user doesn't have to re-type a custom id every time. The
+  // model picker validates a typed id via `get-models-info` before
+  // promoting it onto this list.
+  custom_models: z.array(z.string()).default([]),
+  engine_backend: EngineBackendSchema.default('world_engine'),
+  engine_quant: QuantSchema.default('none'),
   cap_inference_fps: z.boolean().default(true),
   offline_mode: z.boolean().default(false),
   mouse_sensitivity: sensitivitySchema,
@@ -122,3 +144,35 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>
 export type EngineMode = Settings['engine_mode']
 export type Keybindings = Settings['keybindings']
+
+/** How a change to a `Settings` field affects the running session.
+ *
+ *  - `none`: no server impact.
+ *  - `live`: re-sent in a mid-stream `InitRequest`; server diffs and
+ *    applies in place. No modal.
+ *  - `session`: disconnect + warm reconnect + new InitRequest. Modal.
+ *  - `process`: server respawn (standalone) or retarget (server mode). Modal. */
+export type SettingClass = 'none' | 'live' | 'session' | 'process'
+
+/** Interior + leaf paths into `Settings` (`recording`, `recording.enabled`). */
+export type SettingPath = AllPaths<Settings>
+
+/** Restart class per setting. Top-level keys cover the whole subtree;
+ *  dot-paths split when siblings differ. Unlisted paths are `'none'`. */
+export const SETTING_CLASSES: Partial<Record<SettingPath, SettingClass>> = {
+  // Process: env vars / URL only apply at process spawn time.
+  engine_mode: 'process',
+  offline_mode: 'process',
+  server_url: 'process',
+
+  // Session: model / engine / world identity.
+  engine_model: 'session',
+  engine_backend: 'session',
+  engine_quant: 'session',
+  scene_authoring_enabled: 'session',
+
+  // Live: server reconfigures in place.
+  cap_inference_fps: 'live',
+  recording: 'live',
+  'debug_overlays.action_logging': 'live'
+}
