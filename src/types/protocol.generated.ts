@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 // ─── Constants ────────────────────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
 
 // ─── Enums ────────────────────────────────────────────────────────────
 
@@ -288,6 +288,7 @@ export const FrameHeaderSchema = z.object({
   client_ts: z.number(),
   gen_ms: z.number(),
   temporal_compression: z.number().optional(),
+  server_ts_send_ms: z.number().optional(),
   vram_used_bytes: z.number().optional(),
   gpu_util_percent: z.number().optional(),
   t_infer_ms: z.number().optional(),

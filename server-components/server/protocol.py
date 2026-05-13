@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 # ──────────────────────────────────────────────────────────────────────
 
 
-PROTOCOL_VERSION = 3
+PROTOCOL_VERSION = 4
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -415,10 +415,18 @@ ServerPushMessage = Annotated[
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Frame header — embedded in the binary frame envelope:
-#   [4-byte LE header_len][JSON header][JPEG bytes]
-# Sender writes via `header.model_dump_json()`; the binary framing
-# itself is built by call sites since it includes raw JPEG payload.
+# Batch envelope — one WS binary message per inference pass, carrying
+# all `temporal_compression` sub-frames so the client paces them out
+# evenly across the predicted batch interval instead of bursting them.
+#
+#   [4-byte LE header_len][JSON header]
+#   [4-byte LE sub_count]
+#   repeat sub_count times:
+#     [4-byte LE jpeg_len][jpeg bytes]
+#
+# `FrameHeader` is batch-level: one set of timing/profile values for the
+# whole batch. `frame_id` is the perceptual id of the FIRST sub-frame;
+# subsequent sub-frames have ids `frame_id + 1`, `frame_id + 2`, ...
 # ──────────────────────────────────────────────────────────────────────
 
 
@@ -428,9 +436,12 @@ class FrameHeader(BaseModel):
     client_ts: float
     gen_ms: float
     temporal_compression: int = 1
+    # Server monotonic clock when the envelope was queued for send (ms).
+    # Lets the client distinguish server-side timing from network jitter.
+    server_ts_send_ms: float | None = None
     vram_used_bytes: int = -1
     gpu_util_percent: int = -1
-    # Per-frame profile timings, populated only on the inference path.
+    # Per-batch profile timings, populated only on the inference path.
     t_infer_ms: float | None = None
     t_sync_ms: float | None = None
     t_enc_ms: float | None = None

@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import struct
 import threading
+import time
 from dataclasses import dataclass, field
 from queue import Full as QueueFull
 from queue import Queue
@@ -260,31 +261,41 @@ class Connection:
         self.cached_vram_used_bytes = self.system_monitor.vram_used_bytes()
         self.cached_gpu_util_percent = self.system_monitor.gpu_util_percent()
 
-    def build_frame_envelope(
+    def build_batch_envelope(
         self,
-        jpeg: bytes,
-        frame_id: int,
+        jpegs: list[bytes],
+        first_frame_id: int,
         client_ts: float,
         gen_ms: float,
         temporal_compression: int = 1,
         profile: dict[str, float] | None = None,
     ) -> bytes:
-        """Wrap a JPEG-encoded frame in the binary protocol envelope:
-        4-byte LE header length, JSON header (validated against
-        `FrameHeader`), JPEG payload. Going through `FrameHeader` here
-        means the wire shape can't drift from the type the codegen ships
-        to the renderer."""
+        """Pack a batch of JPEG-encoded sub-frames into one binary
+        envelope (see `server/protocol.py` for the wire layout). One
+        message per inference pass — the client paces the sub-frames
+        out across the predicted batch interval instead of seeing them
+        burst-arrive.
+
+        `first_frame_id` is the perceptual id of the first sub-frame in
+        the batch; the client implicitly numbers the rest as
+        `first_frame_id + i`."""
+        assert jpegs, "build_batch_envelope requires at least one sub-frame"
         header_obj = FrameHeader(
-            frame_id=frame_id,
+            frame_id=first_frame_id,
             client_ts=client_ts,
             gen_ms=gen_ms,
             temporal_compression=temporal_compression,
+            server_ts_send_ms=time.perf_counter() * 1000.0,
             vram_used_bytes=self.cached_vram_used_bytes,
             gpu_util_percent=self.cached_gpu_util_percent,
             **(profile or {}),
         )
         header = header_obj.model_dump_json(exclude_none=True).encode("utf-8")
-        return struct.pack("<I", len(header)) + header + jpeg
+        parts: list[bytes] = [struct.pack("<I", len(header)), header, struct.pack("<I", len(jpegs))]
+        for jpeg in jpegs:
+            parts.append(struct.pack("<I", len(jpeg)))
+            parts.append(jpeg)
+        return b"".join(parts)
 
     # ─── Threadsafe enqueue helper (any thread) ────────────────────
     def queue_send(self, payload: BaseModel | bytes) -> None:
@@ -317,7 +328,7 @@ class Connection:
         assert seed is not None, "send_initial_frame requires a loaded seed"
         first_subframe = seed[0] if world_engine.is_multiframe else seed
         jpeg = await asyncio.to_thread(world_engine.frame_to_jpeg, first_subframe)
-        await self.websocket.send_bytes(self.build_frame_envelope(jpeg, frame_id=0, client_ts=0.0, gen_ms=0.0))
+        await self.websocket.send_bytes(self.build_batch_envelope([jpeg], first_frame_id=0, client_ts=0.0, gen_ms=0.0))
 
     def start_recording_segments(self, world_engine: "WorldEngineManager") -> None:
         """Construct the action logger (if logging requested) and open

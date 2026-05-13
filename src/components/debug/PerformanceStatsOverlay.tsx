@@ -62,7 +62,7 @@ const computeFrametimeStats = (entries: { time: number; value: number }[]): Fram
 
 const PerformanceStatsOverlay = () => {
   const { isStreaming, server } = useConnection()
-  const { inputLatency, latentGenMs, temporalCompression, id: frameId } = useFrames()
+  const { inputLatency, latentGenMs, temporalCompression, id: frameId, pacerMetricsRef } = useFrames()
   const { settings } = useSettings()
   const enabled = settings.debug_overlays.performance_stats
   const quant = settings.engine_quant ?? 'none'
@@ -73,6 +73,9 @@ const PerformanceStatsOverlay = () => {
   const engineLabel = `${backend}${quant !== 'none' ? `[${quant}]` : ''}`
   const [, setTick] = useState(0)
   const [ftStats, setFtStats] = useState<FrametimeStats | null>(null)
+  // Sampled from pacerMetricsRef at the 2Hz HUD refresh so the pacer's
+  // per-frame writes don't trigger React renders.
+  const [pacer, setPacer] = useState(pacerMetricsRef.current)
 
   // Ring buffers for sparklines
   const fpsBuf = useRingBuffer()
@@ -132,9 +135,10 @@ const PerformanceStatsOverlay = () => {
     const interval = setInterval(() => {
       setTick((t) => t + 1)
       setFtStats(computeFrametimeStats(ftBufRef.current))
+      setPacer({ ...pacerMetricsRef.current })
     }, 500)
     return () => clearInterval(interval)
-  }, [enabled, isStreaming])
+  }, [enabled, isStreaming, pacerMetricsRef])
 
   if (!enabled || !isStreaming) return null
 
@@ -245,6 +249,26 @@ const PerformanceStatsOverlay = () => {
           </div>
         )}
       </div>
+      <div className="mt-[0.5cqh] mb-[0.3cqh] border-t border-white/15" />
+      <div style={{ color: COLOR_LABEL }} className="mb-[0.3cqh] text-center">
+        Pacer
+      </div>
+      <Row label="PACE" value={pacer.paceMs > 0 ? `${pacer.paceMs.toFixed(1)} ms` : '--'} color={COLOR_HUD} />
+      <Row
+        label="AINT"
+        value={pacer.arrivalIntervalMs > 0 ? `${pacer.arrivalIntervalMs.toFixed(1)} ms` : '--'}
+        color={COLOR_HUD}
+      />
+      <Row
+        label="OVLP"
+        value={`${pacer.overlapsPerSec} /s`}
+        color={pacer.overlapsPerSec > 0 ? COLOR_ERROR : COLOR_GOOD}
+      />
+      <Row
+        label="HOLD"
+        value={`${pacer.holdMsPerBatch.toFixed(1)} ms`}
+        color={pacer.holdMsPerBatch > 5 ? COLOR_WARM : COLOR_GOOD}
+      />
     </div>
   )
 }

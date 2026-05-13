@@ -89,6 +89,17 @@ export type FrameProfile = {
   overheadMs: number
 }
 
+/** One inference pass worth of sub-frames, plus the batch-level header
+ *  fields needed by the pacer to schedule display. The pacer consumes
+ *  this directly; placing it in React state guarantees that the canvas
+ *  pipeline sees every batch exactly once (no ref-vs-state races between
+ *  the WS callback and the consumer effect). */
+export type FrameBatch = {
+  jpegs: Blob[]
+  header: FrameHeader
+  receivedAt: number
+}
+
 /** Live, per-frame-header metrics.  Static identifiers (GPU name, VRAM total,
  *  model, inference FPS) live on ServerConnection rather than here — frame
  *  headers only carry dynamic values. */
@@ -120,14 +131,17 @@ const emptyConnection = (): ServerConnection => ({
 type WebSocketHook = {
   status: ConnectionStatus
   statusStage: StageId | null
+  /** Placeholder frame (seed image during init, or null mid-stream).
+   *  The streaming canvas does NOT read this — it consumes `batch`
+   *  through the pacer. Kept so the loading UI can show the seed. */
   frame: Blob | string | null
+  /** The latest inference batch from the server. The pacer schedules
+   *  its sub-frames out across the predicted batch interval. */
+  batch: FrameBatch | null
   hasRealFrame: boolean
   frameId: number
   latentGenMs: number | null
   temporalCompression: number
-  frameGenMsRef: { current: number }
-  frameTemporalCompressionRef: { current: number }
-  frameIdRef: { current: number }
   server: ServerConnection
   inputLatency: number | null
   logs: LogRecord[]
@@ -149,6 +163,7 @@ type WebSocketHook = {
 export const useWebSocket = (): WebSocketHook => {
   const [status, setStatus] = useState<ConnectionStatus>({ kind: 'idle' })
   const [frame, setFrame] = useState<Blob | string | null>(null)
+  const [batch, setBatch] = useState<FrameBatch | null>(null)
   const [frameId, setFrameId] = useState(0)
   const [latentGenMs, setLatentGenMs] = useState<number | null>(null)
   const [statusStage, setStatusStage] = useState<StageId | null>(null)
@@ -162,9 +177,6 @@ export const useWebSocket = (): WebSocketHook => {
   const isConnectingRef = useRef(false)
   const isReadyRef = useRef(false)
   const lastControlTsRef = useRef<number>(0)
-  const frameGenMsRef = useRef<number>(0)
-  const frameTemporalCompressionRef = useRef<number>(1)
-  const frameIdRef = useRef<number>(0)
   const [temporalCompression, setTemporalCompression] = useState(1)
   const rpcRef = useRef(new WsRpcClient())
   const resolveServerMessage = useCallback(
@@ -258,15 +270,22 @@ export const useWebSocket = (): WebSocketHook => {
       ws.onmessage = (event: MessageEvent<string | ArrayBuffer>) => {
         if (wsRef.current !== ws) return
 
-        // Binary messages: [4-byte LE header_len][FrameHeader JSON][JPEG bytes]
-        // The server sends every frame envelope through `FrameHeader.model_dump_json`,
-        // so the wire shape matches the generated `FrameHeader` type — and we
-        // validate it at runtime via `FrameHeaderSchema` to catch any mid-deploy
-        // version skew before the consumer reads possibly-missing fields.
+        // Binary messages: one envelope per inference batch.
+        //   [4-byte LE header_len][FrameHeader JSON]
+        //   [4-byte LE sub_count]
+        //   repeat sub_count times: [4-byte LE jpeg_len][jpeg bytes]
+        // See server/protocol.py for the canonical wire layout. Parsing
+        // every batch as a single message means the pacer sees the whole
+        // group of sub-frames atomically — no React batching races
+        // between sibling sub-frames.
         if (event.data instanceof ArrayBuffer) {
+          const receivedAt = performance.now()
           const view = new DataView(event.data)
-          const headerLen = view.getUint32(0, true)
-          const headerBytes = new Uint8Array(event.data, 4, headerLen)
+          let off = 0
+          const headerLen = view.getUint32(off, true)
+          off += 4
+          const headerBytes = new Uint8Array(event.data, off, headerLen)
+          off += headerLen
           const headerJson: unknown = JSON.parse(new TextDecoder().decode(headerBytes))
           const headerResult = FrameHeaderSchema.safeParse(headerJson)
           if (!headerResult.success) {
@@ -274,35 +293,40 @@ export const useWebSocket = (): WebSocketHook => {
             return
           }
           const header: FrameHeader = headerResult.data
-          const imageBlob = new Blob([new Uint8Array(event.data, 4 + headerLen)], { type: 'image/jpeg' })
+          const subCount = view.getUint32(off, true)
+          off += 4
+          const jpegs: Blob[] = []
+          for (let i = 0; i < subCount; i++) {
+            const jpegLen = view.getUint32(off, true)
+            off += 4
+            jpegs.push(new Blob([new Uint8Array(event.data, off, jpegLen)], { type: 'image/jpeg' }))
+            off += jpegLen
+          }
 
           const headerTemporalCompression = header.temporal_compression ?? 1
-          frameTemporalCompressionRef.current = headerTemporalCompression
           setTemporalCompression(headerTemporalCompression)
-          frameGenMsRef.current = header.gen_ms
-          frameIdRef.current = header.frame_id
-          // First display frame of each latent pass: update latent gen stats and GPU metrics
-          if ((frameIdRef.current - 1) % headerTemporalCompression === 0) {
-            setLatentGenMs(Math.round(header.gen_ms))
-            const runtime: RuntimeMetrics = {
-              vramUsedBytes: header.vram_used_bytes ?? -1,
-              gpuUtilPercent: header.gpu_util_percent ?? -1,
-              profile:
-                header.t_infer_ms != null
-                  ? {
-                      inferMs: header.t_infer_ms,
-                      syncMs: header.t_sync_ms ?? 0,
-                      encMs: header.t_enc_ms ?? 0,
-                      metricsMs: header.t_metrics_ms ?? 0,
-                      overheadMs: header.t_overhead_ms ?? 0
-                    }
-                  : null
-            }
-            setServer((prev) => ({ ...prev, runtime }))
+          setLatentGenMs(Math.round(header.gen_ms))
+          const runtime: RuntimeMetrics = {
+            vramUsedBytes: header.vram_used_bytes ?? -1,
+            gpuUtilPercent: header.gpu_util_percent ?? -1,
+            profile:
+              header.t_infer_ms != null
+                ? {
+                    inferMs: header.t_infer_ms,
+                    syncMs: header.t_sync_ms ?? 0,
+                    encMs: header.t_enc_ms ?? 0,
+                    metricsMs: header.t_metrics_ms ?? 0,
+                    overheadMs: header.t_overhead_ms ?? 0
+                  }
+                : null
           }
-          setFrame(imageBlob)
+          setServer((prev) => ({ ...prev, runtime }))
+          // `frame_id` is the perceptual id of the first sub-frame in
+          // the batch; report the *last* sub-frame's id for the ROLL
+          // display so it tracks total perceptual frames generated.
+          setBatch({ jpegs, header, receivedAt })
           setHasRealFrame(true)
-          setFrameId(frameIdRef.current)
+          setFrameId(header.frame_id + jpegs.length - 1)
           if (header.client_ts > 0) {
             setInputLatency(Math.round(performance.now() - header.client_ts))
           }
@@ -393,6 +417,7 @@ export const useWebSocket = (): WebSocketHook => {
         // server was in its init flow (e.g. "session.scene_authoring.load") when it
         // died.  It's overwritten by the next session's status messages on reconnect.
         setFrame(null)
+        setBatch(null)
         setHasRealFrame(false)
         setFrameId(0)
         setLatentGenMs(null)
@@ -421,6 +446,7 @@ export const useWebSocket = (): WebSocketHook => {
     }
     setStatus({ kind: 'idle' })
     setFrame(null)
+    setBatch(null)
     setFrameId(0)
     // Explicit user-initiated disconnect — clear everything including any
     // previously cached systemInfo, since this isn't a "server died" case.
@@ -498,13 +524,11 @@ export const useWebSocket = (): WebSocketHook => {
     status,
     statusStage,
     frame,
+    batch,
     hasRealFrame,
     frameId,
     latentGenMs,
     temporalCompression,
-    frameGenMsRef,
-    frameTemporalCompressionRef,
-    frameIdRef,
     server,
     inputLatency,
     logs,
