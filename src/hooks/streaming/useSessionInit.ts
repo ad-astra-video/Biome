@@ -4,7 +4,7 @@ import { buildSessionConfig } from '../../context/streaming/sessionConfig'
 import type { PortalState } from '../../context/portal/portalStateMachine'
 import type { InitRequest, InitResponseData } from '../../types/protocol.generated'
 import type { TranslatableError } from '../../i18n'
-import { DEFAULT_WORLD_ENGINE_MODEL, type Settings } from '../../types/settings'
+import { DEFAULT_ENGINE_MODEL, type Settings } from '../../types/settings'
 import { getLiveSignature, getRestartSignatures, type RestartSignatures } from '../../utils/settingsClassifier'
 import { createLogger } from '../../utils/logger'
 
@@ -99,7 +99,7 @@ export function useSessionInit(opts: {
     if (engineError) return
     warmBootstrapSentRef.current = true
 
-    const selectedModel = settings?.engine_model || DEFAULT_WORLD_ENGINE_MODEL
+    const selectedModel = settings?.engine_model || DEFAULT_ENGINE_MODEL
     const seedFilename = lastSeedRef.current?.filename ?? 'default.jpg'
     log.info('Loading connected - bootstrapping session with model+seed:', selectedModel, seedFilename)
 
@@ -179,7 +179,7 @@ export function useSessionInit(opts: {
       const current = settingsRef.current
       const config = await buildSessionConfig(current, isStandaloneMode)
       await sendInit({
-        model: current.engine_model || DEFAULT_WORLD_ENGINE_MODEL,
+        model: current.engine_model || DEFAULT_ENGINE_MODEL,
         config
       })
     }
@@ -193,7 +193,7 @@ export function useSessionInit(opts: {
       lastSeedRef.current = { filename, imageData: result.base64 }
       const config = await buildSessionConfig(settingsRef.current, isStandaloneMode)
       const metrics = await sendInit({
-        model: settingsRef.current.engine_model || DEFAULT_WORLD_ENGINE_MODEL,
+        model: settingsRef.current.engine_model || DEFAULT_ENGINE_MODEL,
         config,
         seed_image_data: result.base64,
         seed_filename: filename

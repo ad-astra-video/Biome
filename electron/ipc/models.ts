@@ -5,7 +5,7 @@ import type { EngineBackend } from '../../src/types/protocol.generated.js'
 
 const FETCH_TIMEOUT_MS = 10000
 
-/** Resolve the URL of the WorldEngine server to query for metadata.
+/** Resolve the URL of the engine server to query for metadata.
  *
  *  Renderer mode → URL source:
  *    - server mode    → the user's configured `server_url` (passed in)

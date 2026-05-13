@@ -71,7 +71,7 @@ export type EngineLifecycleContextValue = {
    *    - `'nuke'` → wipes the engine + UV directories first; expensive,
    *                 fixes stubborn cases that `'fix'` can't.
    *
-   *  Used by the WorldEngineSection install/reinstall buttons and as
+   *  Used by the EngineSection install/reinstall buttons and as
    *  the recovery path from `not_installed` / `failed`. The state moves
    *  through `preparing` for the duration and lands on `ready` (success)
    *  or `failed` (install or start broke). The resolved value is the

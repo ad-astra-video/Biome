@@ -42,7 +42,7 @@ const ja = {
         },
         connectionLost: {
           title: '接続が切断されました',
-          description: 'World Engine との接続が失われました。再接続しますか？'
+          description: 'エンジンとの接続が失われました。再接続しますか？'
         },
         install: {
           title: 'インストール',
@@ -166,8 +166,8 @@ const ja = {
           system: 'システム設定'
         },
         engineMode: {
-          title: 'エンジンモード',
-          description: 'モデルをどこで動かしますか？ Biome 内ですか、それとも外部ですか？',
+          title: 'モード',
+          description: 'エンジンをどこで動かしますか？ Biome 内ですか、それとも外部ですか？',
           standalone: 'スタンドアロン',
           server: 'サーバー'
         },
@@ -181,9 +181,9 @@ const ja = {
           ownManaged: 'Biome の組み込みサーバー',
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'ワールドエンジン',
-          description: 'セッションを実行するエンジン ·',
+        engine: {
+          title: 'ローカルエンジン',
+          description: 'エンジンの調子は？ ·',
           ready: '準備完了',
           starting: '起動中...',
           notInstalled: '未インストール',
@@ -194,9 +194,9 @@ const ja = {
           reinstall: '再インストール',
           fixInPlace: 'その場で修復',
           totalReinstall: '完全再インストール',
-          notInstalledTooltip: '変更するにはワールドエンジンをインストールしてください',
-          startingTooltip: 'ワールドエンジンの起動が完了するまでお待ちください',
-          failedTooltip: '変更するにはワールドエンジンを修復してください',
+          notInstalledTooltip: '変更するにはエンジンをインストールしてください',
+          startingTooltip: 'エンジンの起動が完了するまでお待ちください',
+          failedTooltip: '変更するにはエンジンを修復してください',
           viewLogs: 'ログを表示'
         },
         performance: {
@@ -220,7 +220,7 @@ const ja = {
         },
         simulation: {
           title: 'シミュレーション',
-          description: 'あなたの世界はどのようにシミュレートしますか？',
+          description: '何があなたの世界をシミュレートしますか？',
           worldModel: 'ワールドモデル',
           worldModelDescription:
             'あなたの世界をシミュレートします。お使いのシステムで動作する範囲で、最も新しく最も大きいモデルを選んでください。',
@@ -450,7 +450,7 @@ const ja = {
       },
       startup: {
         begin: '初期化しています...',
-        world_engine_manager: 'ワールドエンジンを準備しています...',
+        world_engine_manager: 'エンジンを準備しています...',
         safety_checker: 'コンテンツフィルターを読み込んでいます...',
         safety_ready: 'コンテンツフィルターの準備ができました。',
         ready: 'モデルを読み込む準備ができました。'

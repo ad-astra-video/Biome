@@ -18,7 +18,7 @@ export type QuantOption = Quant
 
 export type AppLocale = (typeof LOCALE_OPTIONS)[number]
 
-export const DEFAULT_WORLD_ENGINE_MODEL = 'Overworld/Waypoint-1.5-1B'
+export const DEFAULT_ENGINE_MODEL = 'Overworld/Waypoint-1.5-1B'
 
 // Port 7987 = 'O' (79) + 'W' (87) in ASCII
 export const STANDALONE_PORT = 7987
@@ -73,7 +73,7 @@ export const settingsSchema = z.object({
   locale: z.enum(LOCALE_OPTIONS).default('system'),
   server_url: z.string().default(''),
   engine_mode: z.enum(['standalone', 'server']).default('standalone'),
-  engine_model: z.string().default(DEFAULT_WORLD_ENGINE_MODEL),
+  engine_model: z.string().default(DEFAULT_ENGINE_MODEL),
   // User-added custom HF repo ids that the picker should surface
   // alongside the curated Waypoint collection. Local-only setting:
   // not part of the wire protocol, just remembered between sessions

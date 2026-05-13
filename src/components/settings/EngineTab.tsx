@@ -15,7 +15,7 @@ import SettingsTextInput from '../ui/SettingsTextInput'
 import SettingsCheckbox from '../ui/SettingsCheckbox'
 import SettingsRow from '../ui/SettingsRow'
 import ConfirmModal from '../ui/ConfirmModal'
-import WorldEngineSection from '../engine/WorldEngineSection'
+import EngineSection from '../engine/EngineSection'
 import EngineInstallModal from '../engine/EngineInstallModal'
 
 type MenuModelOption = {
@@ -48,11 +48,11 @@ const formatBytes = (bytes: number): string => {
 const standaloneTooltip = (kind: LifecycleState['kind']): TranslationKey | undefined => {
   switch (kind) {
     case 'not_installed':
-      return 'app.settings.worldEngine.notInstalledTooltip'
+      return 'app.settings.engine.notInstalledTooltip'
     case 'preparing':
-      return 'app.settings.worldEngine.startingTooltip'
+      return 'app.settings.engine.startingTooltip'
     case 'failed':
-      return 'app.settings.worldEngine.failedTooltip'
+      return 'app.settings.engine.failedTooltip'
     case 'ready':
       return undefined
   }
@@ -531,7 +531,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   // The modal stays open across the whole pipeline — including the
   // terminal `ready` state — so the user sees the green "Complete." dot
   // and dismisses on their own. The "view logs" affordance on
-  // WorldEngineSection opens the same modal mid-flight, so closing on
+  // EngineSection opens the same modal mid-flight, so closing on
   // `ready` would race with anyone who tabbed away and came back to
   // check status.
   const runReinstall = async (mode: 'fix' | 'nuke') => {
@@ -625,7 +625,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       )}
 
       {menuEngineMode === 'standalone' && (
-        <WorldEngineSection
+        <EngineSection
           onFixInPlaceClick={() => setShowFixModal(true)}
           onTotalReinstallClick={() => setShowNukeModal(true)}
           onInstallClick={() => void handleInstallEngine()}

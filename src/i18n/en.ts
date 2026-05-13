@@ -41,7 +41,7 @@ const en = {
         },
         connectionLost: {
           title: 'Connection Lost',
-          description: 'The connection to the World Engine was lost. Would you like to try reconnecting?'
+          description: 'The connection to the engine was lost. Would you like to try reconnecting?'
         },
         install: {
           title: 'Installation',
@@ -107,7 +107,7 @@ const en = {
         }
       },
       startup: {
-        startingEngine: 'Starting World Engine...'
+        startingEngine: 'Starting engine...'
       },
       loading: {
         error: 'Error',
@@ -167,8 +167,8 @@ const en = {
           system: 'System Default'
         },
         engineMode: {
-          title: 'Engine Mode',
-          description: 'how will you run the model? as part of Biome, or elsewhere?',
+          title: 'Mode',
+          description: 'where will the engine run? as part of Biome, or elsewhere?',
           standalone: 'Standalone',
           server: 'Server'
         },
@@ -182,9 +182,9 @@ const en = {
           ownManaged: "Biome's built-in server",
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'World Engine',
-          description: 'the engine that runs your sessions ·',
+        engine: {
+          title: 'Local Engine',
+          description: "how's the engine doing? ·",
           ready: 'ready',
           starting: 'starting...',
           notInstalled: 'not installed',
@@ -195,9 +195,9 @@ const en = {
           reinstall: 'Reinstall',
           fixInPlace: 'Fix In Place',
           totalReinstall: 'Total Reinstall',
-          notInstalledTooltip: 'Install World Engine to change this',
-          startingTooltip: 'Wait for World Engine to finish starting',
-          failedTooltip: 'Fix World Engine to change this',
+          notInstalledTooltip: 'Install the engine to change this',
+          startingTooltip: 'Wait for the engine to finish starting',
+          failedTooltip: 'Fix the engine to change this',
           viewLogs: 'view logs'
         },
         performance: {
@@ -221,7 +221,7 @@ const en = {
         },
         simulation: {
           title: 'Simulation',
-          description: 'how will your world be simulated?',
+          description: 'what should simulate your world?',
           worldModel: 'World Model',
           worldModelDescription: 'Simulates your world. Pick the newest, largest one your system can handle.',
           backend: 'Backend',
@@ -449,7 +449,7 @@ const en = {
       },
       startup: {
         begin: 'Initializing...',
-        world_engine_manager: 'Preparing world engine...',
+        world_engine_manager: 'Preparing engine...',
         safety_checker: 'Loading content filter...',
         safety_ready: 'Content filters ready.',
         ready: 'Ready to load model.'

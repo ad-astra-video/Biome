@@ -115,7 +115,7 @@ export type DiagnosticsApp = {
 }
 
 /** The machine running the Biome desktop app (Electron renderer).
- *  In server mode this is NOT the machine running the World Engine —
+ *  In server mode this is NOT the machine running the engine —
  *  see {@link DiagnosticsServer} for that. */
 export type DiagnosticsClient = {
   /** Platform identifier: "linux", "win32", or "darwin". */
@@ -146,7 +146,7 @@ export type DiagnosticsClient = {
   gpu_compositing: Record<string, string>
 }
 
-/** The machine running the World Engine server.  Same physical machine as
+/** The machine running the engine server.  Same physical machine as
  *  the client in standalone mode; a remote host in server mode.  null in
  *  the payload if the server was never reached (e.g. engine install
  *  failure, server didn't start). */
@@ -254,7 +254,7 @@ export type DiagnosticsPayload = {
   app: DiagnosticsApp
   /** The machine running the Biome desktop app. */
   client: DiagnosticsClient
-  /** The machine running the World Engine server, or null if never reached. */
+  /** The machine running the engine server, or null if never reached. */
   server: DiagnosticsServer | null
   /** What the user was doing — present for loading/streaming errors. */
   session?: DiagnosticsSession
@@ -310,7 +310,7 @@ export type IpcCommandMap = {
   'get-settings-path-str': { args: []; return: string }
   'open-settings': { args: []; return: void }
 
-  // Models — thin proxies to the WorldEngine server. `list-models`
+  // Models — thin proxies to the engine server. `list-models`
   // returns the canonical picker list (Waypoint collection ∪ cached,
   // with size + cache-presence baked in); `delete-cached-model` mutates
   // the active server's cache. The renderer doesn't talk to HuggingFace

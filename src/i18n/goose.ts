@@ -42,7 +42,7 @@ const goose = {
         },
         connectionLost: {
           title: 'Connection Lost',
-          description: 'The connection to the World Engine was lost. Waddle back and try reconnecting?'
+          description: 'The connection to the engine was lost. Waddle back and try reconnecting?'
         },
         install: {
           title: 'Installation',
@@ -108,7 +108,7 @@ const goose = {
         }
       },
       startup: {
-        startingEngine: 'Honking the World Engine awake...'
+        startingEngine: 'Honking the engine awake...'
       },
       loading: {
         error: 'Error',
@@ -168,8 +168,8 @@ const goose = {
           system: 'System Default'
         },
         engineMode: {
-          title: 'Engine Mode',
-          description: 'how will you run the model? as part of Biome, or borrowed from the flock?',
+          title: 'Mode',
+          description: 'where will the goose run? as part of Biome, or borrowed from the flock?',
           standalone: 'Standalone',
           server: 'Server'
         },
@@ -183,9 +183,9 @@ const goose = {
           ownManaged: "Biome's home pond",
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'World Engine',
-          description: 'the goose that powers your sessions ·',
+        engine: {
+          title: 'Local Goose',
+          description: "how's the goose doing? ·",
           ready: 'in fine feather',
           starting: 'ruffling feathers...',
           notInstalled: 'no goose yet',
@@ -196,9 +196,9 @@ const goose = {
           reinstall: 'Re-hatch',
           fixInPlace: 'Preen In Place',
           totalReinstall: 'Full Molt',
-          notInstalledTooltip: 'Hatch the World Engine to change this',
-          startingTooltip: 'Wait for the World Engine to finish hatching',
-          failedTooltip: 'Preen the World Engine to change this',
+          notInstalledTooltip: 'Hatch the engine to change this',
+          startingTooltip: 'Wait for the engine to finish hatching',
+          failedTooltip: 'Preen the engine to change this',
           viewLogs: 'peek at the nest'
         },
         performance: {
@@ -222,7 +222,7 @@ const goose = {
         },
         simulation: {
           title: 'Pondulation',
-          description: 'how will your pond be paddled?',
+          description: 'what should paddle your pond?',
           worldModel: 'World Model',
           worldModelDescription: 'Shapes your pond. Pick the newest, biggest model your pond can hold.',
           backend: 'Backend',

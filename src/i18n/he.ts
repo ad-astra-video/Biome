@@ -41,7 +41,7 @@ const he = {
         },
         connectionLost: {
           title: 'החיבור נותק',
-          description: 'החיבור ל-World Engine נותק. לנסות להתחבר מחדש?'
+          description: 'החיבור למנוע נותק. לנסות להתחבר מחדש?'
         },
         install: {
           title: 'התקנה',
@@ -102,7 +102,7 @@ const he = {
         }
       },
       startup: {
-        startingEngine: 'מפעיל את World Engine...'
+        startingEngine: 'מפעיל את המנוע...'
       },
       loading: {
         error: 'שגיאה',
@@ -160,8 +160,8 @@ const he = {
           system: 'ברירת מחדל של המערכת'
         },
         engineMode: {
-          title: 'מצב מנוע',
-          description: 'איך להריץ את המודל? כחלק מ-Biome או במקום אחר?',
+          title: 'מצב',
+          description: 'איפה המנוע ירוץ? כחלק מ-Biome או במקום אחר?',
           standalone: 'עצמאי',
           server: 'שרת'
         },
@@ -175,9 +175,9 @@ const he = {
           ownManaged: 'השרת המובנה של Biome',
           placeholder: 'http://localhost:7987'
         },
-        worldEngine: {
-          title: 'מנוע העולם',
-          description: 'המנוע שמריץ את ההפעלות שלך ·',
+        engine: {
+          title: 'מנוע מקומי',
+          description: 'מה שלום המנוע? ·',
           ready: 'מוכן',
           starting: 'מפעיל...',
           notInstalled: 'לא מותקן',
@@ -187,9 +187,9 @@ const he = {
           reinstall: 'התקן מחדש',
           fixInPlace: 'תקן במקום',
           totalReinstall: 'התקנה מחדש מלאה',
-          notInstalledTooltip: 'התקן את World Engine כדי לשנות את זה',
-          startingTooltip: 'המתן עד ש-World Engine יסיים לעלות',
-          failedTooltip: 'תקן את World Engine כדי לשנות את זה',
+          notInstalledTooltip: 'התקן את המנוע כדי לשנות את זה',
+          startingTooltip: 'המתן עד שהמנוע יסיים לעלות',
+          failedTooltip: 'תקן את המנוע כדי לשנות את זה',
           viewLogs: 'הצג לוגים'
         },
         performance: {
@@ -213,7 +213,7 @@ const he = {
         },
         simulation: {
           title: 'סימולציה',
-          description: 'איך יידמה העולם שלך?',
+          description: 'מה ידמה את העולם שלך?',
           worldModel: 'מודל עולם',
           worldModelDescription: 'מדמה את העולם שלך. בחר את החדש והגדול ביותר שהמערכת שלך מסוגלת להריץ.',
           backend: 'מנגנון',
@@ -437,7 +437,7 @@ const he = {
       },
       startup: {
         begin: 'מאתחל...',
-        world_engine_manager: 'מכין מנוע עולם...',
+        world_engine_manager: 'מכין מנוע...',
         safety_checker: 'טוען מסנן תוכן...',
         safety_ready: 'מסנני התוכן מוכנים.',
         ready: 'מוכן לטעינת מודל.'
