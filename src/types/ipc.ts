@@ -176,6 +176,10 @@ export type DiagnosticsSession = {
   requested_model: string | null
   /** Quantisation the client asked for (e.g. "int8", or null for default). */
   requested_quant: string | null
+  /** Inference backend the client asked for (`'world_engine'` / `'quark'`).
+   *  Null when the saved setting is absent — older builds wrote no value, and
+   *  the server-side default fills in `world_engine`. */
+  requested_backend: string | null
   /** Model the server confirmed loading (from init RPC response).
    *  null if init never completed (crash during warmup). */
   confirmed_model: string | null
