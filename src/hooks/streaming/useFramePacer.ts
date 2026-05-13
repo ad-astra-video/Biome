@@ -47,6 +47,12 @@
  *      not the server-reported `gen_ms` (which excludes wire time and is
  *      stale by the time the client uses it).
  *
+ *      Discontinuity branch: if Δ is implausibly large vs. the previous
+ *      EMA (pause/resume, scene-edit, generate-scene, network drop), the
+ *      EMA snaps to `gen_ms` instead of blending Δ in. Without this, a
+ *      multi-second pause poisons the EMA and takes ~1.5s of recovery
+ *      batches to decay back to the real server rate.
+ *
  *   2. Compute the per-sub-frame display interval `step = arrivalEMA / T`.
  *      Assign each sub-frame an absolute deadline `receivedAt + step·i`.
  *      At steady state, sub-frame T-1's slot ends exactly when the next
@@ -135,6 +141,18 @@ const HOLD_HISTORY = 30
 /** Maximum reasonable arrival interval — guards the first-batch fallback
  *  against absurd `gen_ms` values reported during warmup. */
 const MAX_ARRIVAL_MS = 1000
+
+/** Any inter-batch arrival gap above this absolute floor is treated as a
+ *  discontinuity (pause/resume, scene-edit, generate-scene, network drop)
+ *  rather than as a slow batch — the EMA snaps to `gen_ms` instead of
+ *  blending the gap in. 500ms = ~7 missed batches at a typical 73ms cadence,
+ *  well past any plausible single-batch jitter. */
+const GAP_FLOOR_MS = 500
+
+/** Multiplier on the previous EMA for the same discontinuity test. Catches
+ *  pauses-during-uncapped-fast-server (where `GAP_FLOOR_MS` might still be
+ *  many batches' worth) without false-positives on normal network blips. */
+const GAP_EMA_MULTIPLIER = 5
 
 /** Owns the canvas-render pipeline. One `FrameBatch` per inference
  *  pass goes in; sub-frames are decoded in parallel and presented on
@@ -254,24 +272,51 @@ export function useFramePacer(opts: { batch: FrameBatch | null }): {
     const { jpegs, header, receivedAt } = batch
     const T = Math.max(1, header.temporal_compression ?? 1)
 
-    // Compute the observed inter-batch interval. For the first batch
-    // after connect/reset we have no `lastArrival` to subtract — fall
-    // back to the header's gen_ms (server's measurement of how long
-    // this batch took, which is a reasonable starting estimate).
+    // Compute the observed inter-batch interval. Discontinuity detection:
+    // first batch of a session, or any gap implausibly large vs. the current
+    // EMA, snaps the EMA to `header.gen_ms` instead of blending the gap in.
+    // Without this, a multi-second pause/scene-edit gap would poison the
+    // EMA — at α=0.2 it takes ~20 batches (~1.5s at 73ms cadence) to decay
+    // back to the real server rate, which is exactly the slowdown the user
+    // sees on unpause.
     const lastArrival = lastArrivalRef.current
-    const arrivalInterval = lastArrival === null ? Math.min(header.gen_ms, MAX_ARRIVAL_MS) : receivedAt - lastArrival
-
     const prevEma = arrivalEmaRef.current
-    const ema = prevEma === null ? arrivalInterval : prevEma * (1 - ARRIVAL_ALPHA) + arrivalInterval * ARRIVAL_ALPHA
+    let arrivalInterval: number
+    let isDiscontinuity: boolean
+    if (lastArrival === null || prevEma === null) {
+      arrivalInterval = Math.min(header.gen_ms, MAX_ARRIVAL_MS)
+      isDiscontinuity = true
+    } else {
+      const observedGap = receivedAt - lastArrival
+      if (observedGap > GAP_FLOOR_MS || observedGap > GAP_EMA_MULTIPLIER * prevEma) {
+        arrivalInterval = Math.min(header.gen_ms, MAX_ARRIVAL_MS)
+        isDiscontinuity = true
+      } else {
+        arrivalInterval = observedGap
+        isDiscontinuity = false
+      }
+    }
+
+    const ema = isDiscontinuity
+      ? arrivalInterval
+      : (prevEma ?? arrivalInterval) * (1 - ARRIVAL_ALPHA) + arrivalInterval * ARRIVAL_ALPHA
     arrivalEmaRef.current = ema
     lastArrivalRef.current = receivedAt
 
     const step = ema / T
 
-    // Overlap / underrun bookkeeping against the outgoing batch.
+    // Reconcile the outgoing batch. On a discontinuity the previous batch's
+    // queued sub-frames are stale (and any "hold" duration is meaningless —
+    // we paused, we didn't underrun); just close their bitmaps without
+    // crediting the HUD signals.
     const prev = currentBatchRef.current
     if (prev) {
-      if (prev.nextIdx < prev.subFrameCount) {
+      if (isDiscontinuity) {
+        for (let i = prev.nextIdx; i < prev.subFrameCount; i++) {
+          prev.bitmaps[i]?.close()
+          prev.bitmaps[i] = null
+        }
+      } else if (prev.nextIdx < prev.subFrameCount) {
         // Overlap: previous batch still had sub-frames queued. Drop them
         // and credit one overlap event for the HUD.
         for (let i = prev.nextIdx; i < prev.subFrameCount; i++) {
