@@ -23,7 +23,6 @@ import asyncio
 import contextlib
 import struct
 import threading
-import time
 from dataclasses import dataclass, field
 from queue import Full as QueueFull
 from queue import Queue
@@ -285,7 +284,6 @@ class Connection:
             client_ts=client_ts,
             gen_ms=gen_ms,
             temporal_compression=temporal_compression,
-            server_ts_send_ms=time.perf_counter() * 1000.0,
             vram_used_bytes=self.cached_vram_used_bytes,
             gpu_util_percent=self.cached_gpu_util_percent,
             **(profile or {}),

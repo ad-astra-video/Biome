@@ -436,9 +436,6 @@ class FrameHeader(BaseModel):
     client_ts: float
     gen_ms: float
     temporal_compression: int = 1
-    # Server monotonic clock when the envelope was queued for send (ms).
-    # Lets the client distinguish server-side timing from network jitter.
-    server_ts_send_ms: float | None = None
     vram_used_bytes: int = -1
     gpu_util_percent: int = -1
     # Per-batch profile timings, populated only on the inference path.
