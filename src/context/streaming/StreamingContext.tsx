@@ -112,12 +112,11 @@ export const StreamingProvider = ({ children }: { children: ReactNode }) => {
   })
 
   // Loading-screen "First-time setup, takes 10-30 minutes" overlay flag.
-  // True while the lifecycle is mid-prepare — TerminalDisplay only mounts
-  // during the LOADING portal state, which the user reaches by clicking
-  // Launch, so a `preparing` state observed there means warm-connect's
-  // `ensureReady` triggered a reinstall. Initial-mount preparing happens
-  // before the user can click Launch and so never lands in TerminalDisplay.
-  const isFreshInstall = lifecycle.state.kind === 'preparing'
+  // True only while the lifecycle is mid-prepare AND deps are not yet
+  // synced — i.e. warm-connect's `ensureReady` triggered a reinstall.
+  // A `preparing` state with `isReady=true` is just a normal server
+  // start (fast), so we don't claim a first-time setup is underway.
+  const isFreshInstall = lifecycle.state.kind === 'preparing' && !lifecycle.isReady
 
   const effectiveStatusStage = useMemo(() => statusStage ?? preConnectionStage, [statusStage, preConnectionStage])
 

@@ -45,8 +45,16 @@ export function useLoadingFailureCleanup(opts: {
   useEffect(() => {
     const loadingFailed =
       portalState === loadingState && (connectionStatus.kind === 'error' || connectionStatus.kind === 'idle')
+    // SERVER_BUSY means a previous session is still holding the
+    // single-session slot. Reconnecting won't help until that session
+    // releases — and re-firing warm-connect each time the WS bounces
+    // through 'connecting' → 'error' clears the handledRef guard,
+    // producing a tight retry loop. Surface the error to the user
+    // instead; the server-side disconnect watcher will free the slot
+    // shortly so a manual retry can succeed.
+    const isServerBusy = engineError?.translationKey === 'app.server.error.serverBusy'
 
-    if (!loadingFailed || !engineError) {
+    if (!loadingFailed || !engineError || isServerBusy) {
       handledRef.current = false
       return
     }
