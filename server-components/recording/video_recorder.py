@@ -100,6 +100,13 @@ class VideoRecorder:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._path: Path | None = None
+        # `_pending_properties` holds the segment metadata between
+        # `new_segment` and the first `write_frames` call — ffmpeg
+        # is spawned lazily on the first frame so its `-s WxH` flag
+        # uses the model's actual output shape rather than a declared
+        # `seed_target_size` that may not match (e.g. waypoint-1 360p
+        # whose AE doesn't round-trip 360x640 cleanly).
+        self._pending_properties: RecordingProperties | None = None
         # `_frames_queued` counts frames handed to the writer thread (by
         # the gen thread, in `write_frames`); used by `note_edit` to
         # anchor scene-edit overlays to the user's edit moment, and by
@@ -130,23 +137,31 @@ class VideoRecorder:
     def new_segment(
         self,
         *,
-        width: int,
-        height: int,
         fps: int,
         properties: RecordingProperties | None = None,
     ) -> None:
-        """End any active segment and start a new video file. `properties`
+        """End any active segment and begin a new one. The ffmpeg subprocess
+        is spawned lazily on the first `write_frames` call so its declared
+        frame size matches the model's actual output shape; `properties`
         captures the semantic session state (model, quant, seed, …) and is
         encoded into MP4 metadata atoms internally so callers don't have to
         know how MP4 structures its metadata."""
         self.end_segment()
         ts = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
-        path = self._output_dir / f"{ts}.mp4"
-        self._path = path
+        self._path = self._output_dir / f"{ts}.mp4"
+        self._pending_properties = properties
         self._frames_queued = 0
         self._fps = fps
         self._overlay_text = None
         self._overlay_bitmap = None
+
+    def _spawn_subprocess(self, width: int, height: int) -> None:
+        """Spawn ffmpeg + writer thread for the pending segment, using the
+        actual frame dimensions observed on the first batch. No-op if the
+        pending path has been cleared (`end_segment` raced this call)."""
+        path = self._path
+        if path is None:
+            return
 
         cmd = [
             FFMPEG_EXE,
@@ -158,7 +173,7 @@ class VideoRecorder:
             "-s",
             f"{width}x{height}",
             "-r",
-            str(fps),
+            str(self._fps),
             "-i",
             "pipe:0",
             "-c:v",
@@ -174,8 +189,8 @@ class VideoRecorder:
             "-an",
         ]
         # Output-scoped -metadata flags must come before the output path.
-        if properties:
-            for key, value in _properties_to_mp4_metadata(properties).items():
+        if self._pending_properties:
+            for key, value in _properties_to_mp4_metadata(self._pending_properties).items():
                 if value == "":
                     continue
                 cmd.extend(["-metadata", f"{key}={value}"])
@@ -199,7 +214,7 @@ class VideoRecorder:
                 name="video-recorder",
             )
             self._writer_thread.start()
-            logger.info(f"Video recording -> {path}")
+            logger.info(f"Video recording -> {path} ({width}x{height})")
         except FileNotFoundError:
             logger.warning(f"bundled ffmpeg not found at {FFMPEG_EXE} — video recording disabled")
             self._proc = None
@@ -306,7 +321,17 @@ class VideoRecorder:
         """Hand a batch of RGB numpy frames off to the writer thread.
         Non-blocking — the queue is unbounded so the gen loop never
         backpressures even if libx264 falls behind. Frames sit in RAM
-        (~10 MB per typical batch) until ffmpeg drains them."""
+        (~10 MB per typical batch) until ffmpeg drains them.
+        The very first batch in a segment triggers the lazy ffmpeg
+        spawn, sized to that batch's actual frame shape."""
+        if not frames:
+            return
+        if self._proc is None:
+            if self._path is None:
+                # No active segment (or already ended). Drop silently.
+                return
+            h, w = frames[0].shape[:2]
+            self._spawn_subprocess(width=w, height=h)
         q = self._frame_queue
         if q is None:
             return
@@ -347,6 +372,15 @@ class VideoRecorder:
         so callers (asyncio handler toggling recording off, gen-thread
         reset) aren't held up by encoder backpressure."""
         if self._proc is None:
+            # Segment may have been opened by `new_segment` but received
+            # no frames (ffmpeg spawn is lazy) — clear the pending state
+            # so the next `new_segment` starts fresh.
+            self._path = None
+            self._pending_properties = None
+            self._frames_queued = 0
+            self._fps = 0
+            self._overlay_text = None
+            self._overlay_bitmap = None
             return
         proc = self._proc
         frame_queue = self._frame_queue
@@ -360,6 +394,7 @@ class VideoRecorder:
         self._frame_queue = None
         self._writer_thread = None
         self._path = None
+        self._pending_properties = None
         self._frames_queued = 0
         self._fps = 0
         self._overlay_text = None

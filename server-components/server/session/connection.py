@@ -217,8 +217,6 @@ class Connection:
         if self.video_recorder is None:
             self.video_recorder = VideoRecorder(self.client_host, output_dir=self.video_output_dir)
         self.video_recorder.new_segment(
-            width=world_engine.seed_target_size[1],
-            height=world_engine.seed_target_size[0],
             fps=int(world_engine.inference_fps),
             properties=RecordingProperties(
                 biome_version=self.biome_version or "unknown",
