@@ -3,7 +3,7 @@ name = "biome-server"
 version = "1.1.0-rc3"
 requires-python = "==3.12.*"
 dependencies = [
-  "world-engine @ https://github.com/Overworldai/world_engine/archive/refs/tags/1.5.5.zip",
+  "world-engine @ https://github.com/Overworldai/world_engine/archive/refs/tags/1.5.6.zip",
   # torch/torchvision are pulled in transitively by world-engine, but we must list
   # them directly so that [tool.uv.sources] below routes them through the cu128
   # index. uv only applies `sources` overrides to direct dependencies — transitive
