@@ -68,9 +68,13 @@ const PerformanceStatsOverlay = () => {
   const quant = settings.engine_quant ?? 'none'
   const backend = settings.engine_backend ?? 'unknown?'
   const modelLabel = server.model ?? '—'
-  // `bknd[quant]` — quant nests in brackets only when set, since `none` is the
-  // default and `quark` alone reads cleaner than `quark[none]`.
-  const engineLabel = `${backend}${quant !== 'none' ? `[${quant}]` : ''}`
+  // `bknd <version>[-commit][quant]` — version sits between the backend name
+  // and the quant bracket (e.g. `world_engine 1.5.6` or `quark 0.1.0-e2a14aa[fp8w8a8]`).
+  // Quant nests in brackets only when set, since `none` is the default and
+  // `quark` alone reads cleaner than `quark[none]`.
+  const backendPkg = backend === 'quark' ? server.systemInfo?.quark : server.systemInfo?.world_engine
+  const pkgLabel = [backendPkg?.version, backendPkg?.commit].filter(Boolean).join('-')
+  const engineLabel = `${backend}${pkgLabel ? ` ${pkgLabel}` : ''}${quant !== 'none' ? `[${quant}]` : ''}`
   const [, setTick] = useState(0)
   const [ftStats, setFtStats] = useState<FrametimeStats | null>(null)
   // Sampled from pacerMetricsRef at the 2Hz HUD refresh so the pacer's

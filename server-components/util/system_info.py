@@ -15,15 +15,75 @@ and consumes them directly. Anything device-specific routes through
 
 # pyright: reportMissingTypeStubs=none
 
+import importlib.metadata
+import json
+import re
+from typing import cast
+
 import cpuinfo
 import psutil
 import structlog
 import torch
 
 from engine import devices
-from server.protocol import ErrorSnapshot, SystemInfo
+from server.protocol import ErrorSnapshot, PackageVersion, SystemInfo
 
 logger = structlog.stdlib.get_logger(__name__)
+
+# A 40-char hex blob embedded in a GitHub `/archive/<sha>.zip` URL —
+# uv records exactly that string in `direct_url.json` when the dependency
+# was pinned to a commit-archive rather than a tag or a real VCS source.
+_GITHUB_ARCHIVE_COMMIT_RE = re.compile(r"/archive/(?:refs/heads/[^/]+/)?([0-9a-f]{40})\.zip", re.IGNORECASE)
+
+
+def _resolve_package_version(distribution_name: str) -> PackageVersion | None:
+    """Inspect the installed distribution and return `(version, short commit)`.
+
+    Reads `direct_url.json` (PEP 610) to recover the commit hash when uv
+    installed the package from a git source or a `/archive/<sha>.zip` URL.
+    Falls back to just the distribution version when no source info is
+    available; returns `None` if the package isn't installed at all so the
+    caller can keep going (a missing optional backend isn't fatal)."""
+    try:
+        dist = importlib.metadata.distribution(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+    commit = _extract_commit_from_direct_url(dist.read_text("direct_url.json"), distribution_name)
+    return PackageVersion(version=dist.version, commit=commit)
+
+
+def _extract_commit_from_direct_url(direct_url_text: str | None, distribution_name: str) -> str | None:
+    """Parse a PEP 610 `direct_url.json` blob and return a short commit hash.
+
+    Two shapes are handled: a `vcs_info.commit_id` (set when uv installed
+    the package from a git source) and a `/archive/<40-hex>.zip` GitHub
+    URL (set when the dep is pinned to a commit-archive). Tag archives
+    like `/archive/refs/tags/1.5.6.zip` don't carry a SHA — those return
+    `None` and the caller relies on the distribution version instead."""
+    if not direct_url_text:
+        return None
+    try:
+        parsed = json.loads(direct_url_text)
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse direct_url.json for {distribution_name}: {e}")
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    direct_url = cast("dict[str, object]", parsed)
+
+    vcs_info = direct_url.get("vcs_info")
+    if isinstance(vcs_info, dict):
+        commit_id = cast("dict[str, object]", vcs_info).get("commit_id")
+        if isinstance(commit_id, str) and len(commit_id) >= 7:
+            return commit_id[:7]
+
+    url = direct_url.get("url")
+    if isinstance(url, str):
+        match = _GITHUB_ARCHIVE_COMMIT_RE.search(url)
+        if match:
+            return match.group(1)[:7]
+    return None
 
 
 def _collect_system_info() -> tuple[SystemInfo, devices.NvmlHandle | None]:
@@ -60,8 +120,17 @@ def _collect_system_info() -> tuple[SystemInfo, devices.NvmlHandle | None]:
         driver_version=driver_version,
         torch_version=torch.__version__,
         gpu_count=gpu_count,
+        world_engine=_resolve_package_version("world-engine"),
+        quark=_resolve_package_version("quark"),
     )
     return info, nvml_handle
+
+
+def _format_package(pkg: PackageVersion | None) -> str:
+    if pkg is None:
+        return "[unavailable]"
+    parts = [p for p in (pkg.version, pkg.commit) if p]
+    return "-".join(parts) if parts else "[unavailable]"
 
 
 def _log_system_info(info: SystemInfo) -> None:
@@ -77,6 +146,8 @@ def _log_system_info(info: SystemInfo) -> None:
     logger.info(f"  Runtime: {info.runtime_version or '[unavailable]'}")
     logger.info(f"  Driver:  {info.driver_version or '[unknown]'}")
     logger.info(f"  Torch:   {info.torch_version}")
+    logger.info(f"  WEngn:   {_format_package(info.world_engine)}")
+    logger.info(f"  Quark:   {_format_package(info.quark)}")
 
 
 class SystemMonitor:

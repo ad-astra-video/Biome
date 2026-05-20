@@ -166,6 +166,17 @@ export type DiagnosticsServer = {
   driver: string | null
   /** PyTorch version (e.g. "2.10.0+cu128"). */
   torch: string | null
+  /** Inference backend package versions, by distribution name. `version` is
+   *  the PEP 440 distribution version; `commit` is the short git hash when
+   *  the package was installed from a VCS source (or extracted from a
+   *  GitHub `/archive/<sha>.zip` URL). Either may be null. */
+  world_engine: PackageVersionInfo | null
+  quark: PackageVersionInfo | null
+}
+
+export type PackageVersionInfo = {
+  version: string | null
+  commit: string | null
 }
 
 /** What the user was trying to do when the error occurred. */

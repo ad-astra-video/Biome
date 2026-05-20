@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 # ──────────────────────────────────────────────────────────────────────
 
 
-PROTOCOL_VERSION = 4
+PROTOCOL_VERSION = 5
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -145,6 +145,20 @@ class Quant(StrEnum):
     INTW8A8 = "intw8a8"
 
 
+class PackageVersion(BaseModel):
+    """Installed-package identity for an inference dependency. `version`
+    is the PEP 440 distribution version; `commit` is the short git hash
+    when the package was installed from a VCS source (or from a GitHub
+    `/archive/<sha>.zip` URL). At least one of the two is populated when
+    the package was discovered; both are absent when the dependency
+    couldn't be located via `importlib.metadata`."""
+
+    model_config = _FrozenStrict
+
+    version: str | None = None
+    commit: str | None = None
+
+
 class SystemInfo(BaseModel):
     """Static hardware/runtime identity, snapshot once at startup."""
 
@@ -157,6 +171,8 @@ class SystemInfo(BaseModel):
     driver_version: str | None = None
     torch_version: str
     gpu_count: int = 0
+    world_engine: PackageVersion | None = None
+    quark: PackageVersion | None = None
 
 
 class ErrorSnapshot(BaseModel):
@@ -361,6 +377,8 @@ class SystemInfoMessage(BaseModel):
     driver_version: str | None = None
     torch_version: str
     gpu_count: int = 0
+    world_engine: PackageVersion | None = None
+    quark: PackageVersion | None = None
 
 
 class ErrorMessage(BaseModel):

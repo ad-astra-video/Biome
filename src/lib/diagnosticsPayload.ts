@@ -96,7 +96,11 @@ function buildServer(server: ServerConnection): DiagnosticsServer | null {
     vram_total_bytes: si.vram_total_bytes ?? null,
     runtime: si.runtime_version ?? null,
     driver: si.driver_version ?? null,
-    torch: si.torch_version ?? null
+    torch: si.torch_version ?? null,
+    world_engine: si.world_engine
+      ? { version: si.world_engine.version ?? null, commit: si.world_engine.commit ?? null }
+      : null,
+    quark: si.quark ? { version: si.quark.version ?? null, commit: si.quark.commit ?? null } : null
   }
 }
 

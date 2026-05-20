@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 // ─── Constants ────────────────────────────────────────────────────────
 
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 // ─── Enums ────────────────────────────────────────────────────────────
 
@@ -68,6 +68,20 @@ export type Quant = z.infer<typeof QuantSchema>
 
 // ─── Models ───────────────────────────────────────────────────────────
 
+/**
+ * Installed-package identity for an inference dependency. `version`
+ * is the PEP 440 distribution version; `commit` is the short git hash
+ * when the package was installed from a VCS source (or from a GitHub
+ * `/archive/<sha>.zip` URL). At least one of the two is populated when
+ * the package was discovered; both are absent when the dependency
+ * couldn't be located via `importlib.metadata`.
+ */
+export const PackageVersionSchema = z.object({
+  version: z.string().optional(),
+  commit: z.string().optional()
+})
+export type PackageVersion = z.infer<typeof PackageVersionSchema>
+
 /** Static hardware/runtime identity, snapshot once at startup. */
 export const SystemInfoSchema = z.object({
   cpu_name: z.string().optional(),
@@ -76,7 +90,9 @@ export const SystemInfoSchema = z.object({
   runtime_version: z.string().optional(),
   driver_version: z.string().optional(),
   torch_version: z.string(),
-  gpu_count: z.number().optional()
+  gpu_count: z.number().optional(),
+  world_engine: PackageVersionSchema.optional(),
+  quark: PackageVersionSchema.optional()
 })
 export type SystemInfo = z.infer<typeof SystemInfoSchema>
 
@@ -236,7 +252,9 @@ export const SystemInfoMessageSchema = z.object({
   runtime_version: z.string().optional(),
   driver_version: z.string().optional(),
   torch_version: z.string(),
-  gpu_count: z.number().optional()
+  gpu_count: z.number().optional(),
+  world_engine: PackageVersionSchema.optional(),
+  quark: PackageVersionSchema.optional()
 })
 export type SystemInfoMessage = z.infer<typeof SystemInfoMessageSchema>
 
