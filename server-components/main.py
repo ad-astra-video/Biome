@@ -55,48 +55,68 @@ class StartupConfig:
 # If launched with --parent-pid, poll the parent and exit if it dies.
 # Linux's prctl(PR_SET_PDEATHSIG) is the kernel-level fallback we'd ideally
 # use, but Python doesn't expose it portably; the polling watchdog covers
-# both Linux and Windows. On Windows the bare `os.kill(pid, 0)` check is
-# unreliable in the face of PID recycling — kernel reuses PIDs aggressively
-# and the new occupant can be running as a different user — so when the
-# launcher passes `--parent-start-time` we additionally compare the parent's
-# process-creation time via psutil.
+# both Linux and Windows. A bare `os.kill(pid, 0)` check is unreliable in
+# the face of PID recycling — the kernel reuses PIDs aggressively and the
+# new occupant can be a different process — so the watchdog also pins the
+# parent's psutil `create_time()`, captured as a baseline at startup, and
+# treats a changed creation timestamp as "parent gone".
 
 
-# Tolerance for clock skew between the launcher's clock and the kernel's
-# recorded process-creation timestamp. Process-creation times sit at
-# millisecond precision; one second is generous enough to absorb the
-# stringification round-trip and any small drift, while still being well
-# below the gap any recycled PID would exhibit.
+# Tolerance for the PID-recycling guard. The baseline and every poll both
+# read the parent's creation time from the same source (psutil), and a
+# process's create_time is immutable for its lifetime, so a live parent
+# compares exactly equal — this tolerance only absorbs float round-trip
+# noise. A recycled PID belongs to a process created seconds-to-hours
+# later, so it lands far outside this window.
 _PARENT_START_TIME_TOLERANCE_SEC = 1.0
 
 
 class ParentWatchdog:
     """Monitors a parent process and force-exits this process if the
     parent dies. Constructed in `__main__` (one-shot startup check),
-    then run as an asyncio task by the lifespan (continuous polling)."""
+    then run as an asyncio task by the lifespan (continuous polling).
 
-    def __init__(self, parent_pid: int, parent_start_time: float | None = None) -> None:
+    The recycling guard compares the parent's *current* kernel
+    creation timestamp against a baseline captured here via psutil at
+    construction — deliberately NOT the launcher-supplied
+    `--parent-start-time`. The Electron launcher derives that value as
+    `Date.now()/1000 - process.uptime()`, which lands ~1-3s after the
+    kernel's real `create_time()` on a heavy Electron process (uptime
+    only starts counting once Chromium/V8 has booted). Comparing that
+    cross-source estimate against psutil exceeded the tolerance and
+    false-killed the server at startup. Reading the baseline here means
+    the startup check and every poll use one source, so the tolerance
+    only ever has to absorb genuine float noise."""
+
+    def __init__(self, parent_pid: int) -> None:
         self.parent_pid = parent_pid
-        self.parent_start_time = parent_start_time
+        # Baseline from the kernel, captured now. None if the parent is
+        # already gone or its metadata isn't readable (→ pid-only liveness).
+        self.baseline_create_time = self._read_create_time()
+
+    def _read_create_time(self) -> float | None:
+        try:
+            return psutil.Process(self.parent_pid).create_time()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return None
 
     def _parent_alive(self) -> bool:
-        """True iff a process with the parent's PID exists and (when
-        `parent_start_time` is known) has a matching creation timestamp."""
+        """True iff a process with the parent's PID exists and its
+        creation timestamp still matches the baseline (guards against
+        PID recycling)."""
         try:
-            proc = psutil.Process(self.parent_pid)
-        except psutil.NoSuchProcess:
-            return False
-        if self.parent_start_time is None:
-            return True
-        try:
-            create_time = proc.create_time()
+            current = psutil.Process(self.parent_pid).create_time()
         except psutil.NoSuchProcess:
             return False
         except psutil.AccessDenied:
             # Process exists but we can't read its metadata. Treat as alive
             # rather than self-exit on a transient permission glitch.
             return True
-        return abs(create_time - self.parent_start_time) <= _PARENT_START_TIME_TOLERANCE_SEC
+        if self.baseline_create_time is None:
+            # No baseline (parent was gone/unreadable at construction but
+            # the PID resolves now) → fall back to pid-only liveness.
+            return True
+        return abs(current - self.baseline_create_time) <= _PARENT_START_TIME_TOLERANCE_SEC
 
     def check_alive_or_exit(self) -> None:
         """Synchronous one-shot check at startup, in case the parent
@@ -199,7 +219,7 @@ async def lifespan(app: FastAPI):
     cfg: StartupConfig = app.state.startup_config
     watchdog_task = None
     if cfg.parent_pid is not None:
-        watchdog_task = asyncio.create_task(ParentWatchdog(cfg.parent_pid, cfg.parent_start_time).run())
+        watchdog_task = asyncio.create_task(ParentWatchdog(cfg.parent_pid).run())
 
     yield
 
@@ -254,8 +274,17 @@ if __name__ == "__main__":
         launched_from_standalone=args.launched_from_standalone,
     )
     if args.parent_pid is not None:
-        logger.info("Monitoring parent process", parent_pid=args.parent_pid, parent_start_time=args.parent_start_time)
-        ParentWatchdog(args.parent_pid, args.parent_start_time).check_alive_or_exit()
+        # Self-read the kernel baseline (see ParentWatchdog docstring); the
+        # launcher's `--parent-start-time` is accepted for backward compat
+        # but intentionally not used for the recycling comparison.
+        watchdog = ParentWatchdog(args.parent_pid)
+        logger.info(
+            "Monitoring parent process",
+            parent_pid=args.parent_pid,
+            parent_create_time=watchdog.baseline_create_time,
+            launcher_start_time=args.parent_start_time,
+        )
+        watchdog.check_alive_or_exit()
 
     # Construct the uvicorn Server explicitly (rather than via `uvicorn.run`)
     # so the `/shutdown` route can flip `should_exit` on the live instance,
