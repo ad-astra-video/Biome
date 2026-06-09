@@ -40,10 +40,6 @@ class StartupConfig:
     before the lifespan body itself runs."""
 
     parent_pid: int | None = None
-    # Epoch seconds for the parent's process-creation time, as reported by
-    # the launcher. Paired with `parent_pid` to defend against PID recycling
-    # on Windows: a recycled PID matches, but the creation time won't.
-    parent_start_time: float | None = None
     # True when the launching Biome instance is in standalone mode and
     # owns this process's lifecycle — set via `--launched-from-standalone`
     # so the renderer can refuse to point itself at a server it would
@@ -78,15 +74,7 @@ class ParentWatchdog:
 
     The recycling guard compares the parent's *current* kernel
     creation timestamp against a baseline captured here via psutil at
-    construction — deliberately NOT the launcher-supplied
-    `--parent-start-time`. The Electron launcher derives that value as
-    `Date.now()/1000 - process.uptime()`, which lands ~1-3s after the
-    kernel's real `create_time()` on a heavy Electron process (uptime
-    only starts counting once Chromium/V8 has booted). Comparing that
-    cross-source estimate against psutil exceeded the tolerance and
-    false-killed the server at startup. Reading the baseline here means
-    the startup check and every poll use one source, so the tolerance
-    only ever has to absorb genuine float noise."""
+    construction."""
 
     def __init__(self, parent_pid: int) -> None:
         self.parent_pid = parent_pid
@@ -101,7 +89,7 @@ class ParentWatchdog:
             return None
 
     def _parent_alive(self) -> bool:
-        """True iff a process with the parent's PID exists and its
+        """True if a process with the parent's PID exists and its
         creation timestamp still matches the baseline (guards against
         PID recycling)."""
         try:
@@ -250,15 +238,6 @@ if __name__ == "__main__":
         "--parent-pid", type=int, default=None, help="PID of parent process; server exits if parent dies"
     )
     parser.add_argument(
-        "--parent-start-time",
-        type=float,
-        default=None,
-        help=(
-            "Epoch-seconds creation timestamp of the parent process. When paired with --parent-pid, used to guard"
-            " against PID recycling: a recycled PID won't match the original parent's creation time."
-        ),
-    )
-    parser.add_argument(
         "--launched-from-standalone",
         action="store_true",
         help=(
@@ -270,19 +249,15 @@ if __name__ == "__main__":
 
     app.state.startup_config = StartupConfig(
         parent_pid=args.parent_pid,
-        parent_start_time=args.parent_start_time,
         launched_from_standalone=args.launched_from_standalone,
     )
     if args.parent_pid is not None:
-        # Self-read the kernel baseline (see ParentWatchdog docstring); the
-        # launcher's `--parent-start-time` is accepted for backward compat
-        # but intentionally not used for the recycling comparison.
+        # The watchdog self-reads the parent's create_time as its recycling baseline.
         watchdog = ParentWatchdog(args.parent_pid)
         logger.info(
             "Monitoring parent process",
             parent_pid=args.parent_pid,
             parent_create_time=watchdog.baseline_create_time,
-            launcher_start_time=args.parent_start_time,
         )
         watchdog.check_alive_or_exit()
 
