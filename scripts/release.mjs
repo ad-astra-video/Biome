@@ -75,8 +75,13 @@ writeFileSync(pyprojectPath, updatedPyproject)
 const oldPyVersion = pyproject.match(/^version\s*=\s*"(.*)"$/m)?.[1]
 console.log(`server-components/pyproject.toml: ${oldPyVersion} → ${version}`)
 
+// Resync package-lock.json (npm records the version in both the root and the
+// packages[""] self-entry; --package-lock-only rewrites them without touching node_modules)
+execSync('npm install --package-lock-only', { cwd: root, stdio: 'inherit' })
+console.log('package-lock.json: resynced')
+
 // Commit and tag
-execSync('git add package.json server-components/pyproject.toml', { cwd: root, stdio: 'inherit' })
+execSync('git add package.json package-lock.json server-components/pyproject.toml', { cwd: root, stdio: 'inherit' })
 execSync(`git commit -m "release: ${tag}"`, { cwd: root, stdio: 'inherit' })
 execSync(`git tag -a "${tag}" -m "${tag}"`, { cwd: root, stdio: 'inherit' })
 
