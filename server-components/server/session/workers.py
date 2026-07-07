@@ -282,7 +282,7 @@ async def run_sender(conn: Connection) -> None:
                         await conn.websocket.send_bytes(payload)
                     else:
                         await conn.send_message(payload)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     conn.running = False
                     return
         except Exception:
