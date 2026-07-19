@@ -16,6 +16,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Literal
 
 import psutil
 import structlog
@@ -46,6 +47,28 @@ class StartupConfig:
     # itself shut down on the next mode switch. False for any operator
     # who launched the server by hand for use as a remote backend.
     launched_from_standalone: bool = False
+    # Runtime backend selected by the desktop app. `livepeer` is currently
+    # stubbed (explicit not-implemented path) but still threaded through
+    # startup/health so mode plumbing is end-to-end.
+    runtime_backend: Literal["local", "livepeer"] = "local"
+    livepeer_signer_url: str | None = None
+    livepeer_orchestrator_discovery_url: str | None = None
+
+
+def startup_config_from_env(*, parent_pid: int | None, launched_from_standalone: bool) -> StartupConfig:
+    mode = os.getenv("BIOME_ENGINE_MODE", "standalone").strip().lower()
+    runtime_backend: Literal["local", "livepeer"] = "livepeer" if mode == "livepeer" else "local"
+
+    signer_url = os.getenv("BIOME_LIVEPEER_SIGNER_URL", "").strip() or None
+    discovery_url = os.getenv("BIOME_LIVEPEER_ORCH_DISCOVERY_URL", "").strip() or None
+
+    return StartupConfig(
+        parent_pid=parent_pid,
+        launched_from_standalone=launched_from_standalone,
+        runtime_backend=runtime_backend,
+        livepeer_signer_url=signer_url,
+        livepeer_orchestrator_discovery_url=discovery_url,
+    )
 
 
 # If launched with --parent-pid, poll the parent and exit if it dies.
@@ -247,9 +270,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    app.state.startup_config = StartupConfig(
+    app.state.startup_config = startup_config_from_env(
         parent_pid=args.parent_pid,
         launched_from_standalone=args.launched_from_standalone,
+    )
+    logger.info(
+        "Server runtime mode",
+        engine_mode=os.getenv("BIOME_ENGINE_MODE", "standalone"),
+        runtime_backend=app.state.startup_config.runtime_backend,
+        livepeer_signer_url=app.state.startup_config.livepeer_signer_url,
+        livepeer_orchestrator_discovery_url=app.state.startup_config.livepeer_orchestrator_discovery_url,
     )
     if args.parent_pid is not None:
         # The watchdog self-reads the parent's create_time as its recycling baseline.

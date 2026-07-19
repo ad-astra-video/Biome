@@ -53,6 +53,12 @@ from structlog.contextvars import bound_contextvars
 from engine import Engines
 from engine.manager import ServerCapabilities, supported_capabilities
 from server.caches import TtlCache
+from server.livepeer_runtime import (
+    LivepeerRuntimeError,
+    proxy_livepeer_session,
+    release_runner_session,
+    reserve_runner_session,
+)
 from server.protocol import (
     PROTOCOL_VERSION,
     EngineBackend,
@@ -91,6 +97,13 @@ class SafetyHealth(BaseModel):
     loaded: bool
 
 
+class LivepeerHealth(BaseModel):
+    enabled: bool
+    implemented: bool
+    signer_url: str | None = None
+    orchestrator_discovery_url: str | None = None
+
+
 class HealthResponse(BaseModel):
     """Body of `GET /health`. The renderer uses this to gate "engine ready"
     UI and to clamp dropdowns (backend, quant) against what the server
@@ -103,6 +116,8 @@ class HealthResponse(BaseModel):
     world_engine: WorldEngineHealth
     safety: SafetyHealth
     capabilities: ServerCapabilities
+    runtime_backend: Literal["local", "livepeer"] = "local"
+    livepeer: LivepeerHealth | None = None
     # True when this server was launched by a Biome instance running in
     # standalone mode (via `--launched-from-standalone`). The renderer
     # uses this in remote-server mode to refuse a URL that points to
@@ -281,6 +296,20 @@ async def health(request: Request, startup: Annotated[ServerStartup, Depends(get
     we = engines.world_engine if engines else None
     startup_config = getattr(request.app.state, "startup_config", None)
     launched_from_standalone = startup_config.launched_from_standalone if startup_config is not None else False
+    runtime_backend: Literal["local", "livepeer"] = (
+        startup_config.runtime_backend if startup_config is not None else "local"
+    )
+    livepeer_health: LivepeerHealth | None = None
+    if runtime_backend == "livepeer":
+        signer_url = startup_config.livepeer_signer_url if startup_config is not None else None
+        discovery_url = startup_config.livepeer_orchestrator_discovery_url if startup_config is not None else None
+        livepeer_health = LivepeerHealth(
+            enabled=bool(discovery_url),
+            implemented=True,
+            signer_url=signer_url,
+            orchestrator_discovery_url=discovery_url,
+        )
+
     return HealthResponse(
         startup_complete=startup.complete,
         world_engine=WorldEngineHealth(
@@ -290,6 +319,8 @@ async def health(request: Request, startup: Annotated[ServerStartup, Depends(get
         ),
         safety=SafetyHealth(loaded=engines is not None),
         capabilities=supported_capabilities(),
+        runtime_backend=runtime_backend,
+        livepeer=livepeer_health,
         launched_from_standalone=launched_from_standalone,
     )
 
@@ -830,6 +861,24 @@ async def websocket_endpoint(
                 await conn.send_error(message_id=MessageId.SERVER_STARTUP_FAILED, message=str(startup.error))
                 return
 
+            startup_config = getattr(websocket.app.state, "startup_config", None)
+            runtime_backend = getattr(startup_config, "runtime_backend", "local")
+            if runtime_backend == "livepeer":
+                discovery_url = getattr(startup_config, "livepeer_orchestrator_discovery_url", None)
+                if not discovery_url:
+                    await conn.send_error(
+                        message_id=MessageId.INIT_FAILED,
+                        message="Livepeer mode requires livepeer_orchestrator_discovery_url.",
+                    )
+                    return
+
+                reserved = await reserve_runner_session(discovery_url)
+                try:
+                    await proxy_livepeer_session(conn.websocket, reserved, PROTOCOL_VERSION)
+                finally:
+                    await release_runner_session(discovery_url, reserved.session_id)
+                return
+
             # Past the startup gate: engines are populated.
             engines = get_engines_ws(websocket)
             world_engine = engines.world_engine
@@ -880,6 +929,11 @@ async def websocket_endpoint(
             # Uvicorn may surface client close as ClientDisconnected instead
             # of WebSocketDisconnect — treat both as normal disconnects to
             # avoid noisy tracebacks during intentional reconnects.
+            if isinstance(e, LivepeerRuntimeError):
+                logger.warning("Livepeer runtime error", error=str(e))
+                with contextlib.suppress(Exception):
+                    await conn.send_error(message_id=MessageId.INIT_FAILED, message=str(e))
+                return
             if e.__class__.__name__ == "ClientDisconnected":
                 logger.info("Client disconnected")
             else:

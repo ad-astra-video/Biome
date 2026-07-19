@@ -110,6 +110,20 @@ class ServerStartup:
                 self.mark_stage(StageId.STARTUP_BEGIN)
                 logger.info("Initializing engines (lazy first-connect)...")
 
+                startup_config = getattr(app.state, "startup_config", None)
+                runtime_backend = getattr(startup_config, "runtime_backend", "local")
+                if runtime_backend == "livepeer":
+                    logger.info(
+                        "Livepeer runtime selected; local engine manager init skipped",
+                        signer_url=getattr(startup_config, "livepeer_signer_url", None),
+                        orchestrator_discovery_url=getattr(
+                            startup_config, "livepeer_orchestrator_discovery_url", None
+                        ),
+                    )
+                    self.mark_stage(StageId.STARTUP_READY)
+                    self.mark_done()
+                    return
+
                 self.mark_stage(StageId.STARTUP_ENGINE_MANAGER)
                 # Local imports: bringing in world_engine + the engine
                 # submodules pulls torchvision and other heavy deps that
