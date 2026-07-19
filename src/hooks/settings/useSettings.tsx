@@ -61,7 +61,10 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const engineMode = settings?.engine_mode ?? ENGINE_MODES.STANDALONE
-  const isManagedMode = engineMode !== ENGINE_MODES.SERVER
+  const hasServerUrl = Boolean(settings?.server_url?.trim())
+  const isManagedMode =
+    engineMode === ENGINE_MODES.STANDALONE || (engineMode === ENGINE_MODES.LIVEPEER && !hasServerUrl)
+  const isRemoteMode = engineMode === ENGINE_MODES.SERVER || (engineMode === ENGINE_MODES.LIVEPEER && hasServerUrl)
 
   const getUrl = useCallback(() => {
     if (!settings || isManagedMode) {
@@ -97,7 +100,7 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     getUrl,
     engineMode,
     isStandaloneMode: isManagedMode,
-    isServerMode: engineMode === ENGINE_MODES.SERVER
+    isServerMode: isRemoteMode
   }
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>

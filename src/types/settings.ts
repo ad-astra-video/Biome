@@ -73,8 +73,6 @@ export const settingsSchema = z.object({
   locale: z.enum(LOCALE_OPTIONS).default('system'),
   server_url: z.string().default(''),
   engine_mode: z.enum(['standalone', 'server', 'livepeer']).default('standalone'),
-  livepeer_signer_url: z.string().default(''),
-  livepeer_orchestrator_discovery_url: z.string().default(''),
   engine_model: z.string().default(DEFAULT_ENGINE_MODEL),
   // User-added custom HF repo ids that the picker should surface
   // alongside the curated Waypoint collection. Local-only setting:
@@ -166,8 +164,6 @@ export const SETTING_CLASSES: Partial<Record<SettingPath, SettingClass>> = {
   engine_mode: 'process',
   offline_mode: 'process',
   server_url: 'process',
-  livepeer_signer_url: 'process',
-  livepeer_orchestrator_discovery_url: 'process',
 
   // Session: model / engine / world identity.
   engine_model: 'session',

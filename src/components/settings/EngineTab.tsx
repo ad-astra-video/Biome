@@ -41,15 +41,6 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-const normalizeHttpUrl = (raw: string): string => {
-  const value = raw.trim()
-  const parsed = new URL(value)
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Expected http(s) URL')
-  }
-  return parsed.toString()
-}
-
 /** Tooltip explaining why a standalone-mode-gated control is disabled.
  *  Mirrors the lifecycle's terminal-vs-transient states so the user
  *  knows whether to wait, fix, or install. Returns undefined for
@@ -92,17 +83,15 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
   const configWorldModel = settings.engine_model
   const configServerUrl = settings.server_url
-  const configLivepeerSignerUrl = settings.livepeer_signer_url ?? ''
-  const configLivepeerDiscoveryUrl = settings.livepeer_orchestrator_discovery_url ?? ''
-  const isManagedMode = menuEngineMode !== 'server'
   // User-curated extra HF repo ids. Stable identity matters here: every
   // dependent effect threads it through, and a fresh `?? []` literal
   // each render would retrigger the loader unnecessarily.
   const savedCustomModels = useMemo(() => settings.custom_models ?? [], [settings.custom_models])
 
   const [menuServerUrl, setMenuServerUrl] = useState(configServerUrl)
-  const [menuLivepeerSignerUrl, setMenuLivepeerSignerUrl] = useState(configLivepeerSignerUrl)
-  const [menuLivepeerDiscoveryUrl, setMenuLivepeerDiscoveryUrl] = useState(configLivepeerDiscoveryUrl)
+  const hasRemoteServerUrl = menuServerUrl.trim().length > 0
+  const isManagedMode = menuEngineMode === 'standalone' || (menuEngineMode === 'livepeer' && !hasRemoteServerUrl)
+  const requiresValidatedServerUrl = menuEngineMode === 'server' || (menuEngineMode === 'livepeer' && hasRemoteServerUrl)
   const [menuWorldModel, setMenuWorldModel] = useState(configWorldModel)
   const [menuQuant, setMenuQuant] = useState<QuantOption>(settings.engine_quant ?? 'none')
   const [menuEngineBackend, setMenuEngineBackend] = useState<EngineBackend>(
@@ -191,27 +180,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     () => ({
       collectDraft: () => {
         let nextServerUrl = menuServerUrl
-        let nextLivepeerSignerUrl = menuLivepeerSignerUrl
-        let nextLivepeerDiscoveryUrl = menuLivepeerDiscoveryUrl
         if (nextServerUrl.trim()) {
           try {
             normalizeServerUrl(nextServerUrl)
           } catch {
             nextServerUrl = configServerUrl
-          }
-        }
-        if (nextLivepeerSignerUrl.trim()) {
-          try {
-            nextLivepeerSignerUrl = normalizeHttpUrl(nextLivepeerSignerUrl)
-          } catch {
-            nextLivepeerSignerUrl = configLivepeerSignerUrl
-          }
-        }
-        if (nextLivepeerDiscoveryUrl.trim()) {
-          try {
-            nextLivepeerDiscoveryUrl = normalizeHttpUrl(nextLivepeerDiscoveryUrl)
-          } catch {
-            nextLivepeerDiscoveryUrl = configLivepeerDiscoveryUrl
           }
         }
 
@@ -225,8 +198,6 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         return {
           engine_mode: nextMode,
           server_url: nextServerUrl,
-          livepeer_signer_url: nextLivepeerSignerUrl,
-          livepeer_orchestrator_discovery_url: nextLivepeerDiscoveryUrl,
           engine_model: menuWorldModel,
           engine_backend: menuEngineBackend,
           engine_quant: menuQuant,
@@ -238,17 +209,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
           setShowServerErrorModal(true)
           return false
         }
-        if (menuEngineMode === 'livepeer') {
-          try {
-            if (!menuLivepeerSignerUrl.trim() || !menuLivepeerDiscoveryUrl.trim()) {
-              throw new Error('Missing Livepeer URL')
-            }
-            normalizeHttpUrl(menuLivepeerSignerUrl)
-            normalizeHttpUrl(menuLivepeerDiscoveryUrl)
-          } catch {
-            setShowServerErrorModal(true)
-            return false
-          }
+        if (menuEngineMode === 'livepeer' && menuServerUrl.trim() && serverUrlStatus !== 'valid') {
+          setShowServerErrorModal(true)
+          return false
         }
         // The server filters `list-models` by the in-flight backend,
         // so a saved model that fell off the list is structurally
@@ -265,17 +228,13 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     [
       menuEngineMode,
       menuServerUrl,
-      menuLivepeerSignerUrl,
-      menuLivepeerDiscoveryUrl,
       menuWorldModel,
       menuQuant,
       menuEngineBackend,
       menuCapInferenceFps,
       menuWorldModelAvailable,
       serverUrlStatus,
-      configServerUrl,
-      configLivepeerSignerUrl,
-      configLivepeerDiscoveryUrl
+      configServerUrl
     ]
   )
 
@@ -310,7 +269,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const serverUrlStatusRef = useRef(serverUrlStatus)
   serverUrlStatusRef.current = serverUrlStatus
   useEffect(() => {
-    if (menuEngineMode !== 'server') return
+    if (!requiresValidatedServerUrl) return
     if (!menuServerUrl.trim()) return
     if (serverUrlStatusRef.current !== 'idle') return
 
@@ -338,7 +297,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     return () => {
       cancelled = true
     }
-  }, [menuEngineMode, menuServerUrl, setServerCapabilities])
+  }, [requiresValidatedServerUrl, menuServerUrl, setServerCapabilities])
 
   // Standalone counterpart: probe the local managed server's `/health`
   // once the lifecycle reports it's up, so the backend / quant dropdowns
@@ -369,9 +328,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     }
   }, [menuEngineMode, engineReady, standalonePort, setServerCapabilities])
 
-  const serverUrlForModels = menuEngineMode === 'server' ? menuServerUrl : undefined
+  const serverUrlForModels = requiresValidatedServerUrl ? menuServerUrl : undefined
   useEffect(() => {
-    if (menuEngineMode === 'server' && serverUrlStatus !== 'valid') {
+    if (requiresValidatedServerUrl && serverUrlStatus !== 'valid') {
       setMenuModelOptions([{ id: menuWorldModel, isLocal: false, sizeBytes: null }])
       setMenuModelsLoading(false)
       return
@@ -382,7 +341,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     // so the picker isn't empty; this effect re-fires on the engineReady
     // transition and refetches when the server comes online (e.g. after
     // an Install click finishes).
-    if (menuEngineMode !== 'server' && !engineReady) {
+    if (isManagedMode && !engineReady) {
       setMenuModelOptions([{ id: menuWorldModel, isLocal: false, sizeBytes: null }])
       setMenuModelsLoading(false)
       return
@@ -456,6 +415,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     menuWorldModel,
     menuEngineMode,
     menuEngineBackend,
+    isManagedMode,
+    requiresValidatedServerUrl,
     serverUrlForModels,
     serverUrlStatus,
     savedCustomModels,
@@ -624,7 +585,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         />
       </SettingsSection>
 
-      {menuEngineMode === 'server' && (
+      {(menuEngineMode === 'server' || menuEngineMode === 'livepeer') && (
         <SettingsSection
           title="app.settings.serverUrl.title"
           rawDescription={
@@ -681,37 +642,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         </SettingsSection>
       )}
 
-      {menuEngineMode === 'livepeer' && (
-        <SettingsSection
-          title="app.settings.livepeer.title"
-          description="app.settings.livepeer.description"
-        >
-          <div className="flex flex-col gap-[1cqh]">
-            <SettingsRow
-              label={t('app.settings.livepeer.signerUrl')}
-              hint={t('app.settings.livepeer.signerUrlDescription')}
-            >
-              <SettingsTextInput
-                value={menuLivepeerSignerUrl}
-                onChange={setMenuLivepeerSignerUrl}
-                placeholder="app.settings.livepeer.signerPlaceholder"
-              />
-            </SettingsRow>
-            <SettingsRow
-              label={t('app.settings.livepeer.discoveryUrl')}
-              hint={t('app.settings.livepeer.discoveryUrlDescription')}
-            >
-              <SettingsTextInput
-                value={menuLivepeerDiscoveryUrl}
-                onChange={setMenuLivepeerDiscoveryUrl}
-                placeholder="app.settings.livepeer.discoveryPlaceholder"
-              />
-            </SettingsRow>
-          </div>
-        </SettingsSection>
-      )}
-
-      {menuEngineMode !== 'server' && (
+      {isManagedMode && (
         <EngineSection
           onFixInPlaceClick={() => setShowFixModal(true)}
           onTotalReinstallClick={() => setShowNukeModal(true)}
@@ -771,12 +702,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               hideSelectedInDropdown
               disabled={
                 menuModelsLoading ||
-                (menuEngineMode !== 'server' && !engineReady) ||
-                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+                (isManagedMode && !engineReady) ||
+                (requiresValidatedServerUrl && serverUrlStatus !== 'valid')
               }
-              disabledTooltip={
-                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
-              }
+              disabledTooltip={isManagedMode && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined}
               allowCustom
               onCustomBlur={(modelId) => void handleCustomModelBlur(modelId)}
               customLabel="app.settings.worldModel.custom"
@@ -813,12 +742,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               value={menuEngineBackend}
               onChange={(v) => setMenuEngineBackend(v as EngineBackend)}
               disabled={
-                (menuEngineMode !== 'server' && !engineReady) ||
-                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+                (isManagedMode && !engineReady) ||
+                (requiresValidatedServerUrl && serverUrlStatus !== 'valid')
               }
-              disabledTooltip={
-                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
-              }
+              disabledTooltip={isManagedMode && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined}
             />
           </SettingsRow>
         </div>
@@ -838,12 +765,10 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               value={menuQuant}
               onChange={(v) => setMenuQuant(v as QuantOption)}
               disabled={
-                (menuEngineMode !== 'server' && !engineReady) ||
-                (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
+                (isManagedMode && !engineReady) ||
+                (requiresValidatedServerUrl && serverUrlStatus !== 'valid')
               }
-              disabledTooltip={
-                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
-              }
+              disabledTooltip={isManagedMode && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined}
             />
           </SettingsRow>
           <SettingsCheckbox
@@ -890,9 +815,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       {showServerErrorModal && (
         <ConfirmModal
           title={
-            menuEngineMode === 'livepeer'
-              ? 'app.dialogs.serverUnreachable.title'
-              : serverUrlStatus === 'ownManaged'
+            serverUrlStatus === 'ownManaged'
               ? 'app.dialogs.serverOwnManaged.title'
               : 'app.dialogs.serverUnreachable.title'
           }
@@ -900,26 +823,19 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
             serverUrlStatus === 'ownManaged'
               ? 'app.dialogs.serverOwnManaged.description'
               : !menuServerUrl.trim()
-                ? menuEngineMode === 'livepeer'
-                  ? 'app.dialogs.livepeerConfigInvalid.description'
-                  : 'app.dialogs.serverUnreachable.noUrl'
+                ? 'app.dialogs.serverUnreachable.noUrl'
                 : serverUrlUsesSecureTransport
                   ? 'app.dialogs.serverUnreachable.withUrlSecure'
                   : 'app.dialogs.serverUnreachable.withUrl'
           }
-          descriptionParams={{ url: menuEngineMode === 'livepeer' ? menuLivepeerSignerUrl : menuServerUrl }}
+          descriptionParams={{ url: menuServerUrl }}
           onConfirm={() => setShowServerErrorModal(false)}
           onCancel={() => {
             setShowServerErrorModal(false)
-            if (menuEngineMode === 'livepeer') {
-              setMenuLivepeerSignerUrl(configLivepeerSignerUrl)
-              setMenuLivepeerDiscoveryUrl(configLivepeerDiscoveryUrl)
-            } else {
-              setMenuServerUrl(configServerUrl)
-            }
+            setMenuServerUrl(configServerUrl)
             setServerUrlStatus('idle')
           }}
-          confirmLabel={menuEngineMode === 'livepeer' ? 'app.buttons.back' : 'app.buttons.editUrl'}
+          confirmLabel="app.buttons.editUrl"
           cancelLabel="app.buttons.revert"
         />
       )}
