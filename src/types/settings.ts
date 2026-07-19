@@ -3,7 +3,7 @@ import { SUPPORTED_LOCALES } from '../i18n/locales'
 import { EngineBackendSchema, QuantSchema, type EngineBackend, type Quant } from './protocol.generated'
 import type { AllPaths } from '../utils/settingsClassifier'
 
-export const ENGINE_MODES = { STANDALONE: 'standalone', SERVER: 'server' } as const
+export const ENGINE_MODES = { STANDALONE: 'standalone', SERVER: 'server', LIVEPEER: 'livepeer' } as const
 export const LOCALE_OPTIONS = ['system', ...SUPPORTED_LOCALES] as const
 
 // `EngineBackend` / `Quant` are the canonical wire enums defined in
@@ -72,7 +72,9 @@ export const DEFAULT_AUDIO = {
 export const settingsSchema = z.object({
   locale: z.enum(LOCALE_OPTIONS).default('system'),
   server_url: z.string().default(''),
-  engine_mode: z.enum(['standalone', 'server']).default('standalone'),
+  engine_mode: z.enum(['standalone', 'server', 'livepeer']).default('standalone'),
+  livepeer_signer_url: z.string().default(''),
+  livepeer_orchestrator_discovery_url: z.string().default(''),
   engine_model: z.string().default(DEFAULT_ENGINE_MODEL),
   // User-added custom HF repo ids that the picker should surface
   // alongside the curated Waypoint collection. Local-only setting:
@@ -164,6 +166,8 @@ export const SETTING_CLASSES: Partial<Record<SettingPath, SettingClass>> = {
   engine_mode: 'process',
   offline_mode: 'process',
   server_url: 'process',
+  livepeer_signer_url: 'process',
+  livepeer_orchestrator_discovery_url: 'process',
 
   // Session: model / engine / world identity.
   engine_model: 'session',

@@ -96,6 +96,9 @@ const he = {
           title: 'זה השרת המובנה של Biome',
           description: 'הוא פועל רק כש-Biome במצב standalone. חזור למצב standalone, או הצבע על שרת עצמאי.'
         },
+        livepeerConfigInvalid: {
+          description: 'יש להזין כתובות Livepeer signer ו-orchestrator discovery תקינות לפני שיוצאים מההגדרות.'
+        },
         incompatibleModel: {
           title: 'מודל לא תואם',
           description: 'המודל הנבחר לא יכול להיטען עם המנגנון הזה. החלף מנגנון או בחר מודל אחר.'
@@ -163,7 +166,18 @@ const he = {
           title: 'מצב',
           description: 'איפה המנוע ירוץ? כחלק מ-Biome או במקום אחר?',
           standalone: 'עצמאי',
-          server: 'שרת'
+          server: 'שרת',
+          livepeer: 'Livepeer'
+        },
+        livepeer: {
+          title: 'Livepeer',
+          description: 'באילו נקודות קצה של remote signer ו-orchestrator discovery על Biome להשתמש?',
+          signerUrl: 'Signer URL',
+          signerUrlDescription: 'נקודת קצה של remote signer ב-go-livepeer, למשל /sign-orchestrator-info.',
+          discoveryUrl: 'Orchestrator Discovery URL',
+          discoveryUrlDescription: 'נקודת קצה שמחזירה רשימת orchestrators זמינים לבחירת סשן.',
+          signerPlaceholder: 'https://signer.example.com',
+          discoveryPlaceholder: 'https://orchestrators.example.com'
         },
         serverUrl: {
           title: 'כתובת שרת',

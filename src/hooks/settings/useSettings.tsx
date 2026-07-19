@@ -61,14 +61,15 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
   }, [])
 
   const engineMode = settings?.engine_mode ?? ENGINE_MODES.STANDALONE
+  const isManagedMode = engineMode !== ENGINE_MODES.SERVER
 
   const getUrl = useCallback(() => {
-    if (!settings || engineMode === ENGINE_MODES.STANDALONE) {
+    if (!settings || isManagedMode) {
       return DEFAULT_STANDALONE_URL
     }
 
     return settings.server_url
-  }, [engineMode, settings])
+  }, [isManagedMode, settings])
 
   const openSettingsFile = useCallback(async () => {
     try {
@@ -95,7 +96,7 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     openSettings: openSettingsFile,
     getUrl,
     engineMode,
-    isStandaloneMode: engineMode === ENGINE_MODES.STANDALONE,
+    isStandaloneMode: isManagedMode,
     isServerMode: engineMode === ENGINE_MODES.SERVER
   }
 

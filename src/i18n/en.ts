@@ -100,6 +100,9 @@ const en = {
           description:
             'It only runs while Biome is in standalone mode. Switch back to standalone, or point at an independent server.'
         },
+        livepeerConfigInvalid: {
+          description: 'Enter valid Livepeer signer and orchestrator discovery URLs before leaving settings.'
+        },
         incompatibleModel: {
           title: 'Incompatible Model',
           description:
@@ -170,7 +173,18 @@ const en = {
           title: 'Mode',
           description: 'where will the engine run? as part of Biome, or elsewhere?',
           standalone: 'Standalone',
-          server: 'Server'
+          server: 'Server',
+          livepeer: 'Livepeer'
+        },
+        livepeer: {
+          title: 'Livepeer',
+          description: 'which remote signer and orchestrator discovery endpoints should Biome use?',
+          signerUrl: 'Signer URL',
+          signerUrlDescription: 'Remote signer endpoint (go-livepeer), e.g. /sign-orchestrator-info.',
+          discoveryUrl: 'Orchestrator Discovery URL',
+          discoveryUrlDescription: 'Endpoint that returns available orchestrators for session selection.',
+          signerPlaceholder: 'https://signer.example.com',
+          discoveryPlaceholder: 'https://orchestrators.example.com'
         },
         serverUrl: {
           title: 'Server URL',

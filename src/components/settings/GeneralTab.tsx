@@ -17,7 +17,7 @@ import RecordingsModal from './RecordingsModal'
 
 type GeneralTabProps = {
   active: boolean
-  menuEngineMode: 'server' | 'standalone'
+  menuEngineMode: 'server' | 'standalone' | 'livepeer'
   menuSceneAuthoringEnabled: boolean
   setMenuSceneAuthoringEnabled: (enabled: boolean) => void
   menuOfflineMode: boolean

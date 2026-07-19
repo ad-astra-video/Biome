@@ -94,6 +94,9 @@ const zh = {
           title: '这是 Biome 的内置服务器',
           description: '它只在独立模式下运行。请切换回独立模式，或指向独立运行的服务器。'
         },
+        livepeerConfigInvalid: {
+          description: '离开设置前，请填写有效的 Livepeer signer URL 和 orchestrator discovery URL。'
+        },
         incompatibleModel: {
           title: '不兼容的模型',
           description: '所选模型无法在该后端上加载。请切换后端或选择其他模型。'
@@ -161,7 +164,18 @@ const zh = {
           title: '模式',
           description: '引擎在哪里运行？在 Biome 内，还是在别处？',
           standalone: '独立模式',
-          server: '服务器'
+          server: '服务器',
+          livepeer: 'Livepeer'
+        },
+        livepeer: {
+          title: 'Livepeer',
+          description: 'Biome 应该使用哪些远程 signer 与 orchestrator discovery 端点？',
+          signerUrl: 'Signer URL',
+          signerUrlDescription: 'go-livepeer 远程 signer 端点，例如 /sign-orchestrator-info。',
+          discoveryUrl: 'Orchestrator Discovery URL',
+          discoveryUrlDescription: '返回可用 orchestrator 列表用于会话选择的端点。',
+          signerPlaceholder: 'https://signer.example.com',
+          discoveryPlaceholder: 'https://orchestrators.example.com'
         },
         serverUrl: {
           title: '服务器 URL',

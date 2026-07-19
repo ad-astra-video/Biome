@@ -45,7 +45,7 @@ export type BuildDiagnosticsOptions = {
    *  was actively trying to run a model.  Omitted for install-time errors
    *  where no session was ever established. */
   session?: {
-    engineMode: 'standalone' | 'server'
+    engineMode: 'standalone' | 'server' | 'livepeer'
     requestedModel: string | null
     requestedQuant: string | null
     requestedBackend: string | null

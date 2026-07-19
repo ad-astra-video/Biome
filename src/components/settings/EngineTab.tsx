@@ -41,6 +41,15 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
+const normalizeHttpUrl = (raw: string): string => {
+  const value = raw.trim()
+  const parsed = new URL(value)
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Expected http(s) URL')
+  }
+  return parsed.toString()
+}
+
 /** Tooltip explaining why a standalone-mode-gated control is disabled.
  *  Mirrors the lifecycle's terminal-vs-transient states so the user
  *  knows whether to wait, fix, or install. Returns undefined for
@@ -68,8 +77,8 @@ export type EngineTabHandle = {
 type EngineTabProps = {
   settings: Settings
   active: boolean
-  menuEngineMode: 'server' | 'standalone'
-  setMenuEngineMode: (mode: 'server' | 'standalone') => void
+  menuEngineMode: 'server' | 'standalone' | 'livepeer'
+  setMenuEngineMode: (mode: 'server' | 'standalone' | 'livepeer') => void
 }
 
 const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
@@ -83,12 +92,17 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
 
   const configWorldModel = settings.engine_model
   const configServerUrl = settings.server_url
+  const configLivepeerSignerUrl = settings.livepeer_signer_url ?? ''
+  const configLivepeerDiscoveryUrl = settings.livepeer_orchestrator_discovery_url ?? ''
+  const isManagedMode = menuEngineMode !== 'server'
   // User-curated extra HF repo ids. Stable identity matters here: every
   // dependent effect threads it through, and a fresh `?? []` literal
   // each render would retrigger the loader unnecessarily.
   const savedCustomModels = useMemo(() => settings.custom_models ?? [], [settings.custom_models])
 
   const [menuServerUrl, setMenuServerUrl] = useState(configServerUrl)
+  const [menuLivepeerSignerUrl, setMenuLivepeerSignerUrl] = useState(configLivepeerSignerUrl)
+  const [menuLivepeerDiscoveryUrl, setMenuLivepeerDiscoveryUrl] = useState(configLivepeerDiscoveryUrl)
   const [menuWorldModel, setMenuWorldModel] = useState(configWorldModel)
   const [menuQuant, setMenuQuant] = useState<QuantOption>(settings.engine_quant ?? 'none')
   const [menuEngineBackend, setMenuEngineBackend] = useState<EngineBackend>(
@@ -177,6 +191,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     () => ({
       collectDraft: () => {
         let nextServerUrl = menuServerUrl
+        let nextLivepeerSignerUrl = menuLivepeerSignerUrl
+        let nextLivepeerDiscoveryUrl = menuLivepeerDiscoveryUrl
         if (nextServerUrl.trim()) {
           try {
             normalizeServerUrl(nextServerUrl)
@@ -184,9 +200,33 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
             nextServerUrl = configServerUrl
           }
         }
+        if (nextLivepeerSignerUrl.trim()) {
+          try {
+            nextLivepeerSignerUrl = normalizeHttpUrl(nextLivepeerSignerUrl)
+          } catch {
+            nextLivepeerSignerUrl = configLivepeerSignerUrl
+          }
+        }
+        if (nextLivepeerDiscoveryUrl.trim()) {
+          try {
+            nextLivepeerDiscoveryUrl = normalizeHttpUrl(nextLivepeerDiscoveryUrl)
+          } catch {
+            nextLivepeerDiscoveryUrl = configLivepeerDiscoveryUrl
+          }
+        }
+
+        const nextMode =
+          menuEngineMode === 'server'
+            ? ENGINE_MODES.SERVER
+            : menuEngineMode === 'livepeer'
+              ? ENGINE_MODES.LIVEPEER
+              : ENGINE_MODES.STANDALONE
+
         return {
-          engine_mode: menuEngineMode === 'server' ? ENGINE_MODES.SERVER : ENGINE_MODES.STANDALONE,
+          engine_mode: nextMode,
           server_url: nextServerUrl,
+          livepeer_signer_url: nextLivepeerSignerUrl,
+          livepeer_orchestrator_discovery_url: nextLivepeerDiscoveryUrl,
           engine_model: menuWorldModel,
           engine_backend: menuEngineBackend,
           engine_quant: menuQuant,
@@ -197,6 +237,18 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         if (menuEngineMode === 'server' && (!menuServerUrl.trim() || serverUrlStatus !== 'valid')) {
           setShowServerErrorModal(true)
           return false
+        }
+        if (menuEngineMode === 'livepeer') {
+          try {
+            if (!menuLivepeerSignerUrl.trim() || !menuLivepeerDiscoveryUrl.trim()) {
+              throw new Error('Missing Livepeer URL')
+            }
+            normalizeHttpUrl(menuLivepeerSignerUrl)
+            normalizeHttpUrl(menuLivepeerDiscoveryUrl)
+          } catch {
+            setShowServerErrorModal(true)
+            return false
+          }
         }
         // The server filters `list-models` by the in-flight backend,
         // so a saved model that fell off the list is structurally
@@ -213,21 +265,25 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     [
       menuEngineMode,
       menuServerUrl,
+      menuLivepeerSignerUrl,
+      menuLivepeerDiscoveryUrl,
       menuWorldModel,
       menuQuant,
       menuEngineBackend,
       menuCapInferenceFps,
       menuWorldModelAvailable,
       serverUrlStatus,
-      configServerUrl
+      configServerUrl,
+      configLivepeerSignerUrl,
+      configLivepeerDiscoveryUrl
     ]
   )
 
   useEffect(() => {
-    if (menuEngineMode === 'standalone') {
+    if (isManagedMode) {
       checkEngine().catch(() => null)
     }
-  }, [menuEngineMode, checkEngine])
+  }, [isManagedMode, checkEngine])
 
   // Speculatively drive the engine lifecycle from the menu's draft toggle so
   // the model picker has a working server to query before the user clicks
@@ -237,8 +293,8 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   const setDraftStandalone = lifecycle.setDraftStandalone
   useEffect(() => {
     if (isStreaming) return
-    setDraftStandalone(menuEngineMode === 'standalone')
-  }, [menuEngineMode, isStreaming, setDraftStandalone])
+    setDraftStandalone(isManagedMode)
+  }, [isManagedMode, isStreaming, setDraftStandalone])
 
   // Clear the override on unmount so the lifecycle reverts to the saved
   // setting — handles the back-out-without-saving path. Separated from the
@@ -293,7 +349,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
   // settings UI reflects truth pre-launch.
   const standalonePort = lifecycle.status?.server_port ?? null
   useEffect(() => {
-    if (menuEngineMode !== 'standalone') return
+    if (menuEngineMode === 'server') return
     if (!engineReady) return
     if (standalonePort === null) return
 
@@ -326,7 +382,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     // so the picker isn't empty; this effect re-fires on the engineReady
     // transition and refetches when the server comes online (e.g. after
     // an Install click finishes).
-    if (menuEngineMode === 'standalone' && !engineReady) {
+    if (menuEngineMode !== 'server' && !engineReady) {
       setMenuModelOptions([{ id: menuWorldModel, isLocal: false, sizeBytes: null }])
       setMenuModelsLoading(false)
       return
@@ -407,7 +463,7 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
     engineReady
   ])
 
-  const handleEngineModeChange = (mode: 'server' | 'standalone') => {
+  const handleEngineModeChange = (mode: 'server' | 'standalone' | 'livepeer') => {
     setMenuEngineMode(mode)
     setServerUrlStatus('idle')
     setLastValidatedServerUrl('')
@@ -560,10 +616,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         <SettingsToggle
           options={[
             { value: 'standalone', label: 'app.settings.engineMode.standalone' },
-            { value: 'server', label: 'app.settings.engineMode.server' }
+            { value: 'server', label: 'app.settings.engineMode.server' },
+            { value: 'livepeer', label: 'app.settings.engineMode.livepeer' }
           ]}
           value={menuEngineMode}
-          onChange={(v) => handleEngineModeChange(v as 'server' | 'standalone')}
+          onChange={(v) => handleEngineModeChange(v as 'server' | 'standalone' | 'livepeer')}
         />
       </SettingsSection>
 
@@ -624,7 +681,37 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
         </SettingsSection>
       )}
 
-      {menuEngineMode === 'standalone' && (
+      {menuEngineMode === 'livepeer' && (
+        <SettingsSection
+          title="app.settings.livepeer.title"
+          description="app.settings.livepeer.description"
+        >
+          <div className="flex flex-col gap-[1cqh]">
+            <SettingsRow
+              label={t('app.settings.livepeer.signerUrl')}
+              hint={t('app.settings.livepeer.signerUrlDescription')}
+            >
+              <SettingsTextInput
+                value={menuLivepeerSignerUrl}
+                onChange={setMenuLivepeerSignerUrl}
+                placeholder="app.settings.livepeer.signerPlaceholder"
+              />
+            </SettingsRow>
+            <SettingsRow
+              label={t('app.settings.livepeer.discoveryUrl')}
+              hint={t('app.settings.livepeer.discoveryUrlDescription')}
+            >
+              <SettingsTextInput
+                value={menuLivepeerDiscoveryUrl}
+                onChange={setMenuLivepeerDiscoveryUrl}
+                placeholder="app.settings.livepeer.discoveryPlaceholder"
+              />
+            </SettingsRow>
+          </div>
+        </SettingsSection>
+      )}
+
+      {menuEngineMode !== 'server' && (
         <EngineSection
           onFixInPlaceClick={() => setShowFixModal(true)}
           onTotalReinstallClick={() => setShowNukeModal(true)}
@@ -684,11 +771,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               hideSelectedInDropdown
               disabled={
                 menuModelsLoading ||
-                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode !== 'server' && !engineReady) ||
                 (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
               }
               disabledTooltip={
-                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
               }
               allowCustom
               onCustomBlur={(modelId) => void handleCustomModelBlur(modelId)}
@@ -726,11 +813,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               value={menuEngineBackend}
               onChange={(v) => setMenuEngineBackend(v as EngineBackend)}
               disabled={
-                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode !== 'server' && !engineReady) ||
                 (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
               }
               disabledTooltip={
-                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
               }
             />
           </SettingsRow>
@@ -751,11 +838,11 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
               value={menuQuant}
               onChange={(v) => setMenuQuant(v as QuantOption)}
               disabled={
-                (menuEngineMode === 'standalone' && !engineReady) ||
+                (menuEngineMode !== 'server' && !engineReady) ||
                 (menuEngineMode === 'server' && serverUrlStatus !== 'valid')
               }
               disabledTooltip={
-                menuEngineMode === 'standalone' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
+                menuEngineMode !== 'server' && !engineReady ? standaloneTooltip(lifecycle.state.kind) : undefined
               }
             />
           </SettingsRow>
@@ -803,7 +890,9 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
       {showServerErrorModal && (
         <ConfirmModal
           title={
-            serverUrlStatus === 'ownManaged'
+            menuEngineMode === 'livepeer'
+              ? 'app.dialogs.serverUnreachable.title'
+              : serverUrlStatus === 'ownManaged'
               ? 'app.dialogs.serverOwnManaged.title'
               : 'app.dialogs.serverUnreachable.title'
           }
@@ -811,19 +900,26 @@ const EngineTab = forwardRef<EngineTabHandle, EngineTabProps>((props, ref) => {
             serverUrlStatus === 'ownManaged'
               ? 'app.dialogs.serverOwnManaged.description'
               : !menuServerUrl.trim()
-                ? 'app.dialogs.serverUnreachable.noUrl'
+                ? menuEngineMode === 'livepeer'
+                  ? 'app.dialogs.livepeerConfigInvalid.description'
+                  : 'app.dialogs.serverUnreachable.noUrl'
                 : serverUrlUsesSecureTransport
                   ? 'app.dialogs.serverUnreachable.withUrlSecure'
                   : 'app.dialogs.serverUnreachable.withUrl'
           }
-          descriptionParams={{ url: menuServerUrl }}
+          descriptionParams={{ url: menuEngineMode === 'livepeer' ? menuLivepeerSignerUrl : menuServerUrl }}
           onConfirm={() => setShowServerErrorModal(false)}
           onCancel={() => {
             setShowServerErrorModal(false)
-            setMenuServerUrl(configServerUrl)
+            if (menuEngineMode === 'livepeer') {
+              setMenuLivepeerSignerUrl(configLivepeerSignerUrl)
+              setMenuLivepeerDiscoveryUrl(configLivepeerDiscoveryUrl)
+            } else {
+              setMenuServerUrl(configServerUrl)
+            }
             setServerUrlStatus('idle')
           }}
-          confirmLabel="app.buttons.editUrl"
+          confirmLabel={menuEngineMode === 'livepeer' ? 'app.buttons.back' : 'app.buttons.editUrl'}
           cancelLabel="app.buttons.revert"
         />
       )}

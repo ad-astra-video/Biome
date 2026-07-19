@@ -99,7 +99,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
       },
       serverLogs: websocket.allLogs,
       session: {
-        engineMode: isServerMode ? 'server' : 'standalone',
+        engineMode: settings.engine_mode,
         requestedModel: settings.engine_model ?? null,
         requestedQuant: settings.engine_quant ?? null,
         requestedBackend: settings.engine_backend ?? null
@@ -110,7 +110,7 @@ const TerminalDisplay = ({ onCancel }: TerminalDisplayProps) => {
     server,
     connectionStatus,
     errorDetail,
-    isServerMode,
+    settings.engine_mode,
     progressPercent,
     settings.engine_model,
     settings.engine_quant,

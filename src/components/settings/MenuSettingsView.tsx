@@ -47,9 +47,11 @@ const MenuSettingsView = ({ onBack }: MenuSettingsViewProps) => {
     () => settings.scene_authoring_enabled ?? false
   )
   const [menuOfflineMode, setMenuOfflineMode] = useState(() => settings.offline_mode ?? false)
-  const [menuEngineMode, setMenuEngineMode] = useState<'server' | 'standalone'>(() =>
-    settings.engine_mode === ENGINE_MODES.SERVER ? 'server' : 'standalone'
-  )
+  const [menuEngineMode, setMenuEngineMode] = useState<'server' | 'standalone' | 'livepeer'>(() => {
+    if (settings.engine_mode === ENGINE_MODES.SERVER) return 'server'
+    if (settings.engine_mode === ENGINE_MODES.LIVEPEER) return 'livepeer'
+    return 'standalone'
+  })
   const [hasKeybindConflict, setHasKeybindConflict] = useState(false)
   const [showModeSwitchModal, setShowModeSwitchModal] = useState(false)
   const [showCredits, setShowCredits] = useState(false)

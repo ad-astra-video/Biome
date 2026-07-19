@@ -181,8 +181,8 @@ export type PackageVersionInfo = {
 
 /** What the user was trying to do when the error occurred. */
 export type DiagnosticsSession = {
-  /** "standalone" = local server managed by Biome; "server" = remote server. */
-  engine_mode: 'standalone' | 'server'
+  /** "standalone" = local server managed by Biome; "server" = remote server; "livepeer" = local gateway-managed Livepeer mode. */
+  engine_mode: 'standalone' | 'server' | 'livepeer'
   /** Model the client asked the server to load (from settings). */
   requested_model: string | null
   /** Quantisation the client asked for (e.g. "int8", or null for default). */

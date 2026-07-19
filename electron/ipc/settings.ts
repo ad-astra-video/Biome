@@ -47,6 +47,8 @@ function migrateFromLegacyConfig(parsed: Record<string, unknown>): Partial<Setti
         migrated.engine_mode = 'standalone'
       } else if (mode === 'server') {
         migrated.engine_mode = 'server'
+      } else if (mode === 'livepeer') {
+        migrated.engine_mode = 'livepeer'
       }
     }
 

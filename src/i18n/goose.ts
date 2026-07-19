@@ -101,6 +101,9 @@ const goose = {
           description:
             'It only fills up while Biome is in standalone mode. Waddle back to standalone, or point at an independent pond.'
         },
+        livepeerConfigInvalid: {
+          description: 'Enter valid Livepeer signer and orchestrator discovery URLs before leaving settings.'
+        },
         incompatibleModel: {
           title: 'Incompatible Model',
           description:
@@ -171,7 +174,18 @@ const goose = {
           title: 'Mode',
           description: 'where will the goose run? as part of Biome, or borrowed from the flock?',
           standalone: 'Standalone',
-          server: 'Server'
+          server: 'Server',
+          livepeer: 'Livepeer'
+        },
+        livepeer: {
+          title: 'Livepeer',
+          description: 'which remote signer and orchestrator discovery endpoints should Biome use?',
+          signerUrl: 'Signer URL',
+          signerUrlDescription: 'Remote signer endpoint (go-livepeer), e.g. /sign-orchestrator-info.',
+          discoveryUrl: 'Orchestrator Discovery URL',
+          discoveryUrlDescription: 'Endpoint that returns available orchestrators for session selection.',
+          signerPlaceholder: 'https://signer.example.com',
+          discoveryPlaceholder: 'https://orchestrators.example.com'
         },
         serverUrl: {
           title: 'Server URL',

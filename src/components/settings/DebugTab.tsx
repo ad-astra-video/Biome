@@ -2,7 +2,7 @@ import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SETTINGS_MUTED_TEXT } from '../../styles'
 import { buildDiagnosticsPayload } from '../../lib/diagnosticsPayload'
-import { ENGINE_MODES, type Settings } from '../../types/settings'
+import type { Settings } from '../../types/settings'
 import { useConnection } from '../../context/streaming/connection'
 import { useWebsocket } from '../../context/streaming/websocket'
 import SettingsSection from '../ui/SettingsSection'
@@ -23,7 +23,6 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
   const { t } = useTranslation()
   const { server } = useConnection()
   const websocket = useWebsocket()
-  const isServerMode = settings.engine_mode === ENGINE_MODES.SERVER
   const [menuPerformanceStats, setMenuPerformanceStats] = useState(settings.debug_overlays.performance_stats)
   const [menuInputOverlay, setMenuInputOverlay] = useState(settings.debug_overlays.input)
   const [menuFrameTimeline, setMenuFrameTimeline] = useState(settings.debug_overlays.frame_timeline)
@@ -56,7 +55,7 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
         error: { message: null },
         serverLogs: websocket.allLogs,
         session: {
-          engineMode: isServerMode ? 'server' : 'standalone',
+          engineMode: settings.engine_mode,
           requestedModel: settings.engine_model ?? null,
           requestedQuant: settings.engine_quant ?? null,
           requestedBackend: settings.engine_backend ?? null
@@ -70,7 +69,7 @@ const DebugTab = forwardRef<DebugTabHandle, DebugTabProps>(({ settings, active }
   }, [
     server,
     websocket.allLogs,
-    isServerMode,
+    settings.engine_mode,
     settings.engine_model,
     settings.engine_quant,
     settings.engine_backend,

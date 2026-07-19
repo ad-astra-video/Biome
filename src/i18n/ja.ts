@@ -100,6 +100,9 @@ const ja = {
           description:
             'スタンドアロンモードでのみ動作します。スタンドアロンモードに戻すか、独立したサーバーを指定してください。'
         },
+        livepeerConfigInvalid: {
+          description: '設定を閉じる前に、有効な Livepeer signer URL と orchestrator discovery URL を入力してください。'
+        },
         incompatibleModel: {
           title: '互換性のないモデル',
           description:
@@ -169,7 +172,18 @@ const ja = {
           title: 'モード',
           description: 'エンジンをどこで動かしますか？ Biome 内ですか、それとも外部ですか？',
           standalone: 'スタンドアロン',
-          server: 'サーバー'
+          server: 'サーバー',
+          livepeer: 'Livepeer'
+        },
+        livepeer: {
+          title: 'Livepeer',
+          description: 'Biome が使用する remote signer と orchestrator discovery のエンドポイントを設定します。',
+          signerUrl: 'Signer URL',
+          signerUrlDescription: 'go-livepeer の remote signer エンドポイント（例: /sign-orchestrator-info）。',
+          discoveryUrl: 'Orchestrator Discovery URL',
+          discoveryUrlDescription: 'セッション選択に使う orchestrator 一覧を返すエンドポイント。',
+          signerPlaceholder: 'https://signer.example.com',
+          discoveryPlaceholder: 'https://orchestrators.example.com'
         },
         serverUrl: {
           title: 'サーバー URL',
