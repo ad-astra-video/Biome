@@ -34,6 +34,12 @@ class LivepeerReservedSession:
     app_ws_url: str
 
 
+@dataclass(frozen=True)
+class LivepeerNegotiation:
+    reserve_payload: dict[str, Any]
+    reserve_headers: dict[str, str]
+
+
 class LivepeerRuntimeError(RuntimeError):
     pass
 
@@ -46,6 +52,17 @@ def _normalize_http_base(url: str) -> str:
         raise LivepeerRuntimeError(msg)
     if not parsed.netloc:
         raise LivepeerRuntimeError("Discovery URL is missing host")
+    return value
+
+
+def _normalize_http_url(url: str, *, label: str) -> str:
+    value = url.strip()
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"}:
+        msg = f"Invalid {label} URL scheme: {parsed.scheme!r}"
+        raise LivepeerRuntimeError(msg)
+    if not parsed.netloc:
+        raise LivepeerRuntimeError(f"{label} URL is missing host")
     return value
 
 
@@ -85,15 +102,79 @@ def _post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None
     return parsed
 
 
-async def reserve_runner_session(discovery_url: str) -> LivepeerReservedSession:
+def _extract_headers(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    headers: dict[str, str] = {}
+    for key, header_value in value.items():
+        if isinstance(key, str) and isinstance(header_value, str):
+            headers[key] = header_value
+    return headers
+
+
+async def negotiate_livepeer_session(
+    *,
+    signer_url: str | None,
+    discovery_url: str,
+    protocol_version: int,
+) -> LivepeerNegotiation:
+    reserve_payload: dict[str, Any] = {
+        "mode": "persistent",
+        "protocol": "biome-ws",
+        "protocol_version": protocol_version,
+        "livepeer": {
+            "orchestrator_discovery_url": discovery_url,
+        },
+    }
+    reserve_headers: dict[str, str] = {}
+
+    if not signer_url:
+        return LivepeerNegotiation(reserve_payload=reserve_payload, reserve_headers=reserve_headers)
+
+    signer_endpoint = _normalize_http_url(signer_url, label="signer")
+    signer_payload = {
+        "orchestrator_discovery_url": discovery_url,
+        "mode": "persistent",
+        "protocol": "biome-ws",
+        "protocol_version": protocol_version,
+    }
+
+    try:
+        signed = await asyncio.to_thread(_post_json, signer_endpoint, signer_payload)
+    except URLError as exc:
+        raise LivepeerRuntimeError(f"Failed to negotiate livepeer session with signer: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise LivepeerRuntimeError(f"Failed to negotiate livepeer session with signer: {exc}") from exc
+
+    signer_headers = _extract_headers(signed.get("headers"))
+    if "authorization" in signed and isinstance(signed["authorization"], str):
+        signer_headers.setdefault("authorization", signed["authorization"])
+    if "Authorization" in signed and isinstance(signed["Authorization"], str):
+        signer_headers.setdefault("Authorization", signed["Authorization"])
+
+    reserve_headers.update(signer_headers)
+    reserve_payload["livepeer"]["signer_url"] = signer_endpoint
+    reserve_payload["livepeer"]["signed"] = signed
+    return LivepeerNegotiation(reserve_payload=reserve_payload, reserve_headers=reserve_headers)
+
+
+async def reserve_runner_session(
+    discovery_url: str,
+    *,
+    signer_url: str | None,
+    protocol_version: int,
+) -> LivepeerReservedSession:
     base = _normalize_http_base(discovery_url)
     reserve_url = f"{base}/sessions/reserve"
 
-    payload: dict[str, Any] = {}
-    headers: dict[str, str] = {}
+    negotiation = await negotiate_livepeer_session(
+        signer_url=signer_url,
+        discovery_url=discovery_url,
+        protocol_version=protocol_version,
+    )
 
     try:
-        data = await asyncio.to_thread(_post_json, reserve_url, payload, headers)
+        data = await asyncio.to_thread(_post_json, reserve_url, negotiation.reserve_payload, negotiation.reserve_headers)
     except URLError as exc:
         raise LivepeerRuntimeError(f"Failed to reserve livepeer runner session: {exc}") from exc
     except Exception as exc:  # noqa: BLE001

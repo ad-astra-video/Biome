@@ -37,6 +37,8 @@ export function registerServerIpc(): void {
     const hfHomeDir = getHfHomeDir()
     const hfHubCacheDir = getHfHubCacheDir()
     const settings = readSettingsSync()
+    const livepeerDiscoveryUrl = settings.engine_mode === 'livepeer' ? settings.server_url ?? '' : ''
+    const livepeerSignerUrl = process.env.BIOME_LIVEPEER_SIGNER_URL ?? ''
 
     // Check if server is already running
     const state = getServerState()
@@ -72,8 +74,8 @@ export function registerServerIpc(): void {
       PYTHONFAULTHANDLER: '1',
       BIOME_SERVER_LOG_PATH: path.join(engineDir, 'server.log'),
       BIOME_ENGINE_MODE: settings.engine_mode,
-      BIOME_LIVEPEER_SIGNER_URL: settings.livepeer_signer_url ?? '',
-      BIOME_LIVEPEER_ORCH_DISCOVERY_URL: settings.livepeer_orchestrator_discovery_url ?? '',
+      BIOME_LIVEPEER_SIGNER_URL: livepeerSignerUrl,
+      BIOME_LIVEPEER_ORCH_DISCOVERY_URL: livepeerDiscoveryUrl,
       // Pin the standalone-spawned server to JSON output regardless of what
       // the parent shell has set.  In standalone mode the child's stdout is
       // consumed by `parseLogLine` for the renderer's engine-log buffer; if

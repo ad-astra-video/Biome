@@ -1,291 +1,150 @@
-# Livepeer Remote Runner Integration Plan
+# Livepeer Live Runner Integration (Current Implementation)
 
-## Goal
+## Status
 
-Break out the local model runner path so Biome can run inference through Livepeer (live-runner path) while preserving the existing renderer protocol and UX. The desktop app should configure:
+This document reflects the current implementation in this repository.
 
-- A go-livepeer remote signer URL
-- An orchestrator discovery/list endpoint URL
+- Livepeer mode is implemented as a server-side transport path in Biome server-components.
+- Desktop protocol remains the existing Biome websocket protocol.
+- Persistent session flow is used.
+- GPU runner deployment is supported from the Biome repo via `server-components/Dockerfile.live-runner`.
 
-The server-side integration should use the Python gateway client (`livepeer_gateway` import), with a persistent live streaming session.
+## Runtime Architecture
 
-Scope decision: Live Runner integration in this plan is persistent mode only.
+There are two distinct roles:
 
-This document is planning-only. No implementation is included.
+1. Intermediary server (control-plane side)
+- Owns reserve/release ticket lifecycle.
+- Chooses or discovers runner capacity.
+- Returns session-scoped `app_url`.
 
-## Current Runner Architecture (Biome)
+2. Biome GPU runner (operator side)
+- Runs Biome server-components on GPU machines.
+- Exposes `/health` and `/ws`.
+- Registers itself to orchestrator at startup using dynamic registration.
+- Does not manage reserve/release tickets locally.
 
-### Where model execution is currently bound to local process inference
+## Desktop to Runner Flow
 
-- Session orchestration and typed message flow:
-  - `server-components/server/session/handlers.py`
-  - `server-components/server/session/workers.py`
-  - `server-components/server/session/connection.py`
-- Local model lifecycle and frame generation:
-  - `server-components/engine/manager.py`
-- Lazy startup wiring:
-  - `server-components/server/startup.py`
-  - `server-components/main.py`
+1. User selects `engine_mode=livepeer` in settings.
+2. Electron starts server-components with `BIOME_ENGINE_MODE=livepeer`.
+3. In livepeer mode, startup skips local world-engine manager initialization.
+4. On desktop websocket connect to server `/ws`:
+   - server calls discovery endpoint `/sessions/reserve`
+   - optional signer negotiation is performed first
+   - response provides `session_id` + `app_url`
+5. Server opens websocket to reserved runner `app_url` and proxies bytes both directions.
+6. On disconnect/teardown, server calls `/sessions/{session_id}/release`.
 
-### How the desktop app currently connects
+The desktop app remains unaware of runner topology.
 
-- Settings shape and mode selection (`standalone` / `server`):
-  - `src/types/settings.ts`
-  - `electron/ipc/settings.ts`
-- Warm-connect and URL derivation:
-  - `src/context/streaming/streamingWarmConnection.ts`
-  - `src/utils/serverUrl.ts`
-- Local server lifecycle (spawn/health/stop):
-  - `electron/ipc/server.ts`
-  - `src/context/engineLifecycle/EngineLifecycleContext.tsx`
+## Implemented Components
 
-### Existing seam we can leverage
+### 1) Livepeer mode settings and process plumbing
 
-Biome already decouples renderer transport from inference internals:
+- `src/types/settings.ts`
+  - includes `engine_mode: standalone | server | livepeer`.
+  - `server_url` is the primary process-level URL setting.
 
-- Renderer consumes WebSocket frames and typed RPC responses
-- Server internally decides how frames are produced
+- `electron/ipc/server.ts`
+  - passes `BIOME_ENGINE_MODE` to Python server.
+  - in livepeer mode, maps `server_url` to `BIOME_LIVEPEER_ORCH_DISCOVERY_URL`.
+  - forwards optional signer URL from environment as `BIOME_LIVEPEER_SIGNER_URL`.
 
-This means we can swap the backend from local `world_engine` frame generation to a Livepeer-backed runner while keeping the renderer protocol stable.
+### 2) Server startup behavior
 
-## Livepeer Inputs and Contracts
+- `server-components/main.py`
+  - reads `BIOME_ENGINE_MODE`, signer URL, discovery URL into startup config.
+  - supports live-runner dynamic registration on startup (see env vars below).
 
-## Python gateway side
+- `server-components/server/startup.py`
+  - if runtime backend is livepeer, marks startup ready without loading local engine manager.
 
-From `livepeer-python-gateway` APIs and examples:
+### 3) Livepeer transport/proxy path
 
-- Job/session creation via `start_lv2v()` / `start_scope()`
-- Inputs include:
-  - `orch_url` (explicit orchestrator list)
-  - `discovery_url`
-  - `signer_url`
-- Live Runner registration/session APIs are first-class in `ja/live-runner`:
-  - `register_runner()` in `src/livepeer_gateway/live_runner.py`
-  - `runner_selector()` / `reserve_session()` in `src/livepeer_gateway/selection.py`
-  - runner/discovery filtering in `src/livepeer_gateway/discovery.py`
-- WebSocket runner support is explicit (not a workaround):
-  - `examples/ping-pong/runner.py` exposes `/ws`
-  - `examples/ping-pong/client.py` discovers runner and calls `ws_connect(app_url + '/ws')`
-  - `examples/ping-pong/README.md` calls this a proxied websocket URL flow
-- Persistent stream/job object also provides publish/subscribe/control/events hooks for media pipelines
-- Payment and signer flow uses:
-  - `/sign-orchestrator-info`
-  - `/generate-live-payment`
-  - optional signer discovery fallback `/discover-orchestrators`
+- `server-components/server/livepeer_runtime.py`
+  - validates discovery/signer URLs.
+  - performs signer negotiation when signer URL is configured.
+  - reserves session at discovery endpoint.
+  - proxies websocket traffic between desktop and reserved runner endpoint.
+  - releases reserved session on teardown.
 
-### Direct implication for Biome protocol (persistent mode)
+- `server-components/server/routes.py`
+  - in livepeer mode, websocket path routes through reserve -> proxy -> release.
+  - single-session gate is disabled in livepeer mode to allow concurrent sessions.
+  - `/health` reports runtime backend and livepeer config status.
 
-Biome can keep its existing websocket message semantics and binary frame envelope format if the Live Runner app endpoint implements Biome's websocket contract.
+### 4) GPU operator runner image
 
-- Persistent mode flow only: reserve session first (`reserve_session()`), then connect to session-scoped `app_url + '/ws'`.
-- Session lifecycle must include explicit release (`stop_runner_session(...)`) on disconnect, mode switch, and app shutdown.
-- For side-channels (if needed later): Live Runner also exposes session headers and trickle channel helpers (`create_trickle_channels`, `remove_trickle_channels`, `create_proxy`).
+- `server-components/Dockerfile.live-runner`
+  - CUDA runtime base image.
+  - installs server-components dependencies via `uv`.
+  - enables live-runner registration mode by default.
 
-So the integration target should be "Biome protocol over Live Runner websocket" rather than converting Biome protocol to LV2V media IO primitives.
+- `server-components/README.md`
+  - documents build/run commands and required env vars.
 
-## go-livepeer remote signer side
+## Runner Registration (Aligned to app-examples Pattern)
 
-Relevant remote signer endpoints and behavior:
+The GPU runner uses SDK dynamic registration on startup, matching Livepeer app-examples shape:
 
-- `POST /sign-orchestrator-info`
-- `POST /generate-live-payment`
-- optional `GET /discover-orchestrators` (when remote discovery enabled)
+- uses `livepeer_gateway.live_runner.register_runner(...)`
+- stores returned registration handle
+- closes registration handle on shutdown
 
-This aligns with your requirement for a signer URL and a dedicated orchestrator-list/discovery endpoint URL.
+Required when live-runner mode is enabled:
 
-## Proposed Target Architecture
+- `BIOME_LIVE_RUNNER_ENABLED=1`
+- `BIOME_LIVE_RUNNER_ORCHESTRATOR_URL=<http(s) orchestrator URL>`
+- `BIOME_LIVE_RUNNER_ORCH_SECRET=<orchestrator secret>`
 
-Keep Biome renderer protocol unchanged. Introduce a server-side runner adapter layer:
+Optional registration tuning:
 
-- `LocalRunnerAdapter` (existing world_engine behavior)
-- `LivepeerRunnerAdapter` (new livepeer gateway behavior)
+- `BIOME_LIVE_RUNNER_APP_ID` (default `biome/gpu-runner`)
+- `BIOME_LIVE_RUNNER_MODE` (default `persistent`)
+- `BIOME_LIVE_RUNNER_CAPACITY`
+- `BIOME_LIVE_RUNNER_PRICE_PER_UNIT`
+- `BIOME_LIVE_RUNNER_PIXELS_PER_UNIT`
+- `BIOME_RUNNER_PUBLIC_BASE_URL` (advertised external runner URL)
 
-For `LivepeerRunnerAdapter`, prefer a websocket-first implementation:
+## Current API Responsibilities
 
-- Host a Biome-protocol websocket app behind Live Runner registration.
-- Route Biome renderer websocket traffic through Live Runner `app_url`.
-- Register runner with `mode='persistent'` only.
-- Treat Live Runner as transport/session orchestration and payment/discovery, while Biome protocol remains the application protocol.
+### Intermediary server (expected)
 
-Both adapters should expose the same minimal session contract used by current handlers/workers:
+- `POST /sessions/reserve`
+- `POST /sessions/{session_id}/release`
+- ticket issuance/validation
+- runner selection/capacity policy
 
-1. initialize session with model/config/seed
-2. apply controls (buttons/mouse deltas/prompt/reset/pause)
-3. produce frame batches for outbound websocket envelopes
-4. report health/capabilities/errors
-5. close/cleanup session
+### GPU runner (Biome server-components)
 
-## Breakout Points (Where to Refactor)
+- `GET /health`
+- `GET /api/system-info`
+- `WS /ws`
 
-### 1) Session execution loop split
+Runner-side reserve/release ticket APIs are intentionally not the source of truth.
 
-Current coupling is strongest in `run_generator()` and `handle_init()`:
+## Known Gaps / Follow-ups
 
-- `server-components/server/session/workers.py`
-- `server-components/server/session/handlers.py`
+1. Frontend simplification remains partially complete.
+- Goal is a single server URL setting for livepeer mode.
+- Some UI code still contains legacy Livepeer-specific fields and should be removed for consistency.
 
-Plan:
+2. Control-plane contract documentation can be formalized.
+- Reserve/release response schema and ticket semantics should be documented in a dedicated protocol doc.
 
-- Extract a runner-agnostic `SessionRuntime` interface
-- Move world-engine-specific operations into a local runtime implementation
-- Add a new Livepeer runtime implementation that wraps `livepeer_gateway`
+3. End-to-end operator validation should be automated.
+- Add integration test covering registration success and reserve/proxy/release through control plane.
 
-### 2) Engine manager usage isolation
+## Practical Deployment Summary
 
-Current worker/handler logic directly calls `WorldEngineManager` methods.
+1. Build runner image from Biome repo:
+- `docker build -f server-components/Dockerfile.live-runner -t biome-live-runner .`
 
-Plan:
+2. Run on GPU host with required env vars:
+- set orchestrator URL + secret
+- set public runner URL reachable by orchestrator
 
-- Introduce a runtime facade object in connection/session state
-- Replace direct manager calls with runtime calls in handshake/init/game-loop paths
-- Keep `WorldEngineManager` untouched initially, behind `LocalRunnerAdapter`
+3. Configure desktop/server livepeer mode to point at intermediary discovery endpoint.
 
-### 3) Startup wiring changes
-
-Current `ServerStartup` always prepares local engines.
-
-Plan:
-
-- Add startup mode selection for runtime backend
-- In Livepeer mode, skip heavy local model manager initialization
-- Keep safety checker strategy explicit:
-  - either local safety checker retained
-  - or delegated/disabled in first iteration (must be explicit in UX and docs)
-
-### 4) Health and capability reporting
-
-`/health` currently reports local engine flags and backend/quant capabilities.
-
-Plan:
-
-- Extend health payload with runtime backend identity (`local` vs `livepeer`)
-- In Livepeer mode, expose gateway connectivity status (signer/discovery/session)
-- Keep existing fields backward compatible for renderer
-
-## Settings and UX Changes
-
-## New settings fields (proposed)
-
-Add to settings schema and IPC persistence:
-
-- `livepeer_enabled` (or new `engine_mode` variant, see below)
-- `livepeer_signer_url`
-- `livepeer_orchestrator_discovery_url`
-- optional:
-  - `livepeer_orchestrators` (comma-separated or list)
-  - `livepeer_token`
-  - `livepeer_signer_headers` / `livepeer_discovery_headers`
-
-## Engine mode strategy
-
-Recommended: add explicit third mode (for clarity and safer rollout):
-
-- `standalone` (existing local managed server)
-- `server` (existing external Biome-compatible server URL)
-- `livepeer` (new gateway-managed remote inference)
-
-This avoids overloading existing `server` semantics and keeps migration risk lower.
-
-## Settings UI
-
-Update `EngineTab` to show Livepeer configuration block:
-
-- remote signer URL input
-- orchestrator discovery/list URL input
-- validation status using existing probe/error patterns
-
-## Phased Implementation Plan
-
-## Phase 0: Guardrails and feature flag
-
-1. Add compile-time/runtime feature flag for Livepeer runner path.
-2. Ensure default behavior remains unchanged.
-
-## Phase 1: Runtime abstraction
-
-1. Introduce runner runtime interface and adapter wiring in session layer.
-2. Implement `LocalRunnerAdapter` by delegating existing behavior.
-3. Refactor handlers/workers to use interface only.
-
-Deliverable: no behavior change, all existing flows pass.
-
-## Phase 2: Settings + plumbing
-
-1. Add Livepeer settings fields and persistence.
-2. Add UI controls and validation states.
-3. Thread config into server startup/session context.
-
-Deliverable: config can be entered and serialized; Livepeer mode selectable behind flag.
-
-## Phase 3: Livepeer adapter MVP
-
-1. Add `livepeer-python-gateway` dependency (branch pin to `ja/live-runner` as needed).
-2. Implement gateway session bootstrap using signer + discovery/orchestrator inputs.
-3. Implement persistent session lifecycle only (reserve, connect, run, stop/release).
-4. Map Biome controls and prompt/reset semantics onto gateway control/events APIs.
-5. Convert incoming media to Biome frame envelope format.
-
-Deliverable: end-to-end streaming in Livepeer mode.
-
-## Phase 4: Robustness and observability
-
-1. Add reconnect/retry policy for signer/discovery/orchestrator selection failures.
-2. Add structured logs for gateway session state transitions.
-3. Expose diagnostics in existing error report payloads.
-
-Deliverable: operationally debuggable Livepeer mode.
-
-## Phase 5: Compatibility and hardening
-
-1. Verify mode switch behavior (live session teardown/reconnect).
-2. Verify health probes and capability UI behavior under partial outages.
-3. Validate auth header handling and secret redaction in logs.
-
-Deliverable: release-ready behavior parity with existing modes.
-
-## Key Risks and Mitigations
-
-1. Protocol mismatch between Biome WS expectations and gateway output cadence.
-   - Mitigation: keep Biome WS contract unchanged; perform adaptation server-side only.
-2. Different control semantics between local runner and Livepeer runtime.
-   - Mitigation: define explicit control mapping table and test each input path.
-3. Signer/discovery auth complexity.
-   - Mitigation: start with URL-only fields first; add optional headers/token in follow-up.
-4. Startup regressions from conditional engine init.
-   - Mitigation: isolate startup branching and keep local startup code path untouched.
-
-## Validation Checklist (Post-Implementation)
-
-1. Standalone mode unchanged (install, start, stream).
-2. Server mode unchanged (external Biome server URL).
-3. Livepeer mode can:
-   - validate signer URL
-   - validate discovery/list URL
-  - reserve persistent session
-   - stream frames to renderer
-   - process controls
-  - release session cleanly on disconnect
-   - recover from transient remote failure.
-4. Diagnostics report includes Livepeer session context and endpoint provenance.
-
-## Open Decisions for Review
-
-1. Should Livepeer be a distinct `engine_mode` value (`livepeer`) or a sub-mode of `server`?
-2. Should we include header/token fields in V1, or URL-only in V1 and expand in V2?
-3. Should local NSFW seed safety remain required in Livepeer mode, optional, or delegated?
-4. Should orchestrator source be one field (discovery URL only) or both explicit list + discovery URL from day one?
-
-Resolved for this plan:
-
-- Live Runner mode support: persistent only.
-- No single-shot mode implementation in V1.
-
-## Suggested First Implementation Slice
-
-After approval, implement only Phase 1 + Phase 2 first (no gateway dependency yet):
-
-- Introduce runtime abstraction
-- Add new settings schema/UI/plumbing
-- Keep Livepeer runtime as a stub returning explicit "not implemented" errors
-
-That de-risks core refactor before networked runner integration.
+4. Intermediary reserves sessions and routes each session to registered GPU runners.

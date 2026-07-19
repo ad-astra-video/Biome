@@ -1,0 +1,40 @@
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /srv/biome-server
+
+# System dependencies for Python runtime and pinned CUDA python wheels.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3-pip \
+    python3.12-venv \
+    ffmpeg \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.12 /usr/local/bin/python
+
+# uv is required because server-components uses [tool.uv.sources]
+# for CUDA-compatible dependency resolution.
+RUN python -m pip install --upgrade pip uv
+
+# Build context must be the Biome repo root.
+COPY server-components/ ./
+
+# Install pinned dependencies from lockfile into the system interpreter.
+RUN uv sync --frozen --no-dev
+
+# Intermediate server mode: handles Livepeer reserve/proxy/release flow.
+ENV BIOME_ENGINE_MODE=livepeer \
+    BIOME_LIVE_RUNNER_ENABLED=0 \
+    BIOME_LOG_FORMAT=json
+
+EXPOSE 7987
+
+CMD ["uv", "run", "main.py", "--host", "0.0.0.0", "--port", "7987"]

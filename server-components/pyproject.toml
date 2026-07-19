@@ -30,6 +30,7 @@ dependencies = [
   "gguf>=0.10.0; sys_platform != 'darwin'",
   "imageio-ffmpeg==0.6.0",
   "structlog==25.5.0",
+  "livepeer-gateway @ git+https://github.com/livepeer/livepeer-python-gateway@ja/live-runner",
 ]
 
 [dependency-groups]

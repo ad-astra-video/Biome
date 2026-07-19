@@ -41,3 +41,66 @@ In Biome settings:
 
 - Set engine mode to hosted **Server** mode.
 - Set server URL to your remote endpoint (for example `http://192.168.1.50:7987`).
+
+## Operator Docker image (GPU inference node)
+
+The Biome repository includes a GPU-focused image definition at
+`server-components/Dockerfile.live-runner` so operators can run model download
+and inference on dedicated machines.
+
+Build from the Biome repo root:
+
+```bash
+docker build -f server-components/Dockerfile.live-runner -t biome-live-runner .
+```
+
+Run with NVIDIA GPU access:
+
+```bash
+docker run --rm --gpus all -p 7987:7987 \
+	-e BIOME_LIVE_RUNNER_ORCHESTRATOR_URL=http://<orchestrator-host>:<port> \
+	-e BIOME_LIVE_RUNNER_ORCH_SECRET=<orch-secret> \
+	-e BIOME_RUNNER_PUBLIC_BASE_URL=http://<public-runner-host>:7987 \
+	biome-live-runner
+```
+
+Then point your control-plane server / client at `http://<runner-host>:7987`.
+
+Notes:
+
+- `BIOME_LIVE_RUNNER_ORCHESTRATOR_URL` is required when live-runner mode is enabled
+	(enabled by default in `Dockerfile.live-runner`).
+- `BIOME_LIVE_RUNNER_ORCH_SECRET` is also required for dynamic registration
+	(`register_runner`) with the orchestrator.
+- The runner exposes `/health` and `/ws`; session ticket lifecycle is expected
+	to be managed by the intermediary control-plane server.
+
+## Intermediate server Docker image (control plane)
+
+The Biome repository also includes an intermediate/control-plane image at
+`server-components/Dockerfile.runner-server`. This image runs the Biome
+server in `livepeer` mode and is intended to reserve/proxy/release sessions to
+registered runners.
+
+Build from the Biome repo root:
+
+```bash
+docker build -f server-components/Dockerfile.runner-server -t biome-runner-server .
+```
+
+Run with your orchestrator discovery URL:
+
+```bash
+docker run --rm -p 7987:7987 \
+	-e BIOME_LIVEPEER_ORCH_DISCOVERY_URL=http://<orchestrator-host>:<port> \
+	biome-runner-server
+```
+
+Optional signer integration:
+
+```bash
+docker run --rm -p 7987:7987 \
+	-e BIOME_LIVEPEER_ORCH_DISCOVERY_URL=http://<orchestrator-host>:<port> \
+	-e BIOME_LIVEPEER_SIGNER_URL=https://<signer-host>/sign \
+	biome-runner-server
+```

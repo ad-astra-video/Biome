@@ -799,20 +799,21 @@ async def websocket_endpoint(
             await websocket.close()
             return
 
-        # Single-session gate: the shared `WorldEngine` is single-tenant
-        # (rolling frame history, seed slot, progress callback are all
-        # process-wide singletons), so a second concurrent client would
-        # interleave inputs into the same frame stream and produce
-        # incoherent output for both. Reject with a typed error and
-        # close. The check + claim are both synchronous, so no two
-        # concurrent handshakes can both pass under asyncio's
-        # cooperative scheduling.
-        if websocket.app.state.active_session is not None:
-            logger.warning("Rejecting client: another session is active")
-            await conn.send_error(message_id=MessageId.SERVER_BUSY)
-            await websocket.close()
-            return
-        websocket.app.state.active_session = conn
+        startup_config = getattr(websocket.app.state, "startup_config", None)
+        runtime_backend = getattr(startup_config, "runtime_backend", "local")
+        requires_single_session_gate = runtime_backend != "livepeer"
+
+        # Single-session gate only for local WorldEngine mode: the shared
+        # world engine is process-singleton state and cannot be safely
+        # multi-tenant. In livepeer mode we proxy to runner sessions, so
+        # each client can reserve and use an independent remote runner.
+        if requires_single_session_gate:
+            if websocket.app.state.active_session is not None:
+                logger.warning("Rejecting client: another session is active")
+                await conn.send_error(message_id=MessageId.SERVER_BUSY)
+                await websocket.close()
+                return
+            websocket.app.state.active_session = conn
 
         # Phase 4 (`prepare_session`) does most of its heavy work via
         # `asyncio.to_thread`, which doesn't yield enough for the main
@@ -861,10 +862,9 @@ async def websocket_endpoint(
                 await conn.send_error(message_id=MessageId.SERVER_STARTUP_FAILED, message=str(startup.error))
                 return
 
-            startup_config = getattr(websocket.app.state, "startup_config", None)
-            runtime_backend = getattr(startup_config, "runtime_backend", "local")
             if runtime_backend == "livepeer":
                 discovery_url = getattr(startup_config, "livepeer_orchestrator_discovery_url", None)
+                signer_url = getattr(startup_config, "livepeer_signer_url", None)
                 if not discovery_url:
                     await conn.send_error(
                         message_id=MessageId.INIT_FAILED,
@@ -872,7 +872,11 @@ async def websocket_endpoint(
                     )
                     return
 
-                reserved = await reserve_runner_session(discovery_url)
+                reserved = await reserve_runner_session(
+                    discovery_url,
+                    signer_url=signer_url,
+                    protocol_version=PROTOCOL_VERSION,
+                )
                 try:
                     await proxy_livepeer_session(conn.websocket, reserved, PROTOCOL_VERSION)
                 finally:
@@ -945,7 +949,7 @@ async def websocket_endpoint(
             # session that claimed it. (We will always be — the gate
             # above is the only way to enter this try block — but the
             # check makes the intent explicit.)
-            if websocket.app.state.active_session is conn:
+            if requires_single_session_gate and websocket.app.state.active_session is conn:
                 websocket.app.state.active_session = None
             world_engine_for_teardown = engines.world_engine if engines is not None else None
             conn.teardown(world_engine_for_teardown, log_task, progress_task)

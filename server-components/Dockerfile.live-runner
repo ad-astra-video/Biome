@@ -1,0 +1,41 @@
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /srv/biome-server
+
+# System dependencies for Python runtime and model/inference stack.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3-pip \
+    python3.12-venv \
+    ffmpeg \
+    git \
+    curl \
+    ca-certificates \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python3.12 /usr/local/bin/python
+
+# uv is required because server-components uses [tool.uv.sources]
+# to pin CUDA-compatible torch/llama-cpp artifacts.
+RUN python -m pip install --upgrade pip uv
+
+# Copy server-components from the Biome repository into the image.
+COPY server-components/ ./
+
+# Install pinned dependencies from lockfile into the system interpreter.
+RUN uv sync --frozen --no-dev
+
+ENV BIOME_ENGINE_MODE=standalone \
+    BIOME_LIVE_RUNNER_ENABLED=1 \
+    BIOME_LOG_FORMAT=json \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+EXPOSE 7987
+
+CMD ["uv", "run", "main.py", "--host", "0.0.0.0", "--port", "7987"]

@@ -14,9 +14,10 @@ import argparse
 import asyncio
 import os
 import sys
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlsplit
 
 import psutil
 import structlog
@@ -32,6 +33,76 @@ logger.info("Starting server...")
 apply_resolved_token()
 
 logger.info("Basic imports done")
+
+
+def _runner_public_base_url(bound_host: str, bound_port: int) -> str:
+    configured = os.getenv("BIOME_RUNNER_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if configured:
+        return configured
+    host = bound_host if bound_host not in {"0.0.0.0", "::"} else "127.0.0.1"
+    return f"http://{host}:{bound_port}"
+
+
+async def _register_live_runner(app: "FastAPI") -> None:
+    enabled = os.getenv("BIOME_LIVE_RUNNER_ENABLED", "0").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return
+
+    orchestrator_url = os.getenv("BIOME_LIVE_RUNNER_ORCHESTRATOR_URL", "").strip().rstrip("/")
+    if not orchestrator_url:
+        raise RuntimeError("BIOME_LIVE_RUNNER_ORCHESTRATOR_URL is required when BIOME_LIVE_RUNNER_ENABLED=1")
+
+    parsed = urlsplit(orchestrator_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError("BIOME_LIVE_RUNNER_ORCHESTRATOR_URL must be a valid http(s) URL")
+
+    orchestrator_secret = os.getenv("BIOME_LIVE_RUNNER_ORCH_SECRET", "").strip()
+    if not orchestrator_secret:
+        raise RuntimeError("BIOME_LIVE_RUNNER_ORCH_SECRET is required when BIOME_LIVE_RUNNER_ENABLED=1")
+
+    bound_host = getattr(app.state, "bound_host", "127.0.0.1")
+    bound_port = int(getattr(app.state, "bound_port", 7987))
+    runner_base_url = _runner_public_base_url(bound_host, bound_port)
+
+    app_id = os.getenv("BIOME_LIVE_RUNNER_APP_ID", "biome/gpu-runner").strip() or "biome/gpu-runner"
+    mode = os.getenv("BIOME_LIVE_RUNNER_MODE", "persistent").strip() or "persistent"
+    capacity_str = os.getenv("BIOME_LIVE_RUNNER_CAPACITY", "").strip()
+    price_per_unit_str = os.getenv("BIOME_LIVE_RUNNER_PRICE_PER_UNIT", "").strip()
+    pixels_per_unit_str = os.getenv("BIOME_LIVE_RUNNER_PIXELS_PER_UNIT", "").strip()
+
+    try:
+        from livepeer_gateway.live_runner import register_runner
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "livepeer-gateway SDK is required for dynamic live-runner registration. "
+            "Install dependency: livepeer-gateway @ git+https://github.com/livepeer/livepeer-python-gateway@ja/live-runner"
+        ) from exc
+
+    kwargs: dict[str, object] = {}
+    if capacity_str:
+        kwargs["capacity"] = int(capacity_str)
+    if price_per_unit_str:
+        kwargs["price_per_unit"] = int(price_per_unit_str)
+    if pixels_per_unit_str:
+        kwargs["pixels_per_unit"] = int(pixels_per_unit_str)
+
+    registration = await register_runner(
+        orchestrator_url,
+        secret=orchestrator_secret,
+        runner_url=runner_base_url,
+        app=app_id,
+        mode=mode,
+        **kwargs,
+    )
+    app.state.live_runner_registration = registration
+    logger.info(
+        "Live-runner registration succeeded",
+        orchestrator_url=orchestrator_url,
+        runner_id=getattr(registration, "runner_id", None),
+        runner_url=runner_base_url,
+        app=app_id,
+        mode=mode,
+    )
 
 
 @dataclass(frozen=True)
@@ -232,7 +303,14 @@ async def lifespan(app: FastAPI):
     if cfg.parent_pid is not None:
         watchdog_task = asyncio.create_task(ParentWatchdog(cfg.parent_pid).run())
 
+    await _register_live_runner(app)
+
     yield
+
+    registration = getattr(app.state, "live_runner_registration", None)
+    if registration is not None:
+        with suppress(Exception):
+            await registration.close()
 
     if watchdog_task is not None:
         watchdog_task.cancel()
@@ -305,6 +383,8 @@ if __name__ == "__main__":
     )
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
+    app.state.bound_host = args.host
+    app.state.bound_port = args.port
 
     try:
         server.run()
